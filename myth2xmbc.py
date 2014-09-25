@@ -35,7 +35,7 @@ def prettify(xml_element):
     return reparsed.toprettyxml(indent="\t")
 
 
-def write_series_nfo(directory, title, rating, votes, plot, id, genre, premiered, studio, dateadded):
+def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added):
     """
     write nfo file for series
     :param directory:
@@ -44,10 +44,10 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre, premiered
     :param votes:
     :param plot:
     :param id:
-    :param genre:
+    :param genre_list:
     :param premiered:
     :param studio:
-    :param dateadded:
+    :param date_added:
     :return:
     """
     root = ET2.Element('tvshow')
@@ -61,14 +61,25 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre, premiered
     title_element.text = plot
     title_element = ET2.SubElement(root, 'id')
     title_element.text = id
-    title_element = ET2.SubElement(root, 'genre')
-    title_element.text = genre
+
+    # add genres
+    if genre_list is not None and '|' in genre_list:
+        genre_list = genre_list.strip('|').split('|')
+        #print 'genre_list: ' + str(genre_list)
+        for genre in genre_list:
+            #print 'genre: ' + genre
+            title_element = ET2.SubElement(root, 'genre')
+            title_element.text = genre
+    else:
+        title_element = ET2.SubElement(root, 'genre')
+        title_element.text = genre_list
+
     title_element = ET2.SubElement(root, 'premiered')
     title_element.text = premiered
     title_element = ET2.SubElement(root, 'studio')
     title_element.text = studio
     title_element = ET2.SubElement(root, 'dateadded')
-    title_element.text = dateadded
+    title_element.text = date_added
     tree = ET2.ElementTree(root)
     tree.write(os.path.join(directory, 'tvshow.nfo'), pretty_print=True, encoding='UTF-8', xml_declaration=True)
     return
@@ -85,7 +96,8 @@ def write_episode_nfo(title, season, episode, plot, airdate, base_link_file):
     :param base_link_file:
     :return:
     """
-    print '    ' + base_link_file if args.add is not None else None
+    if args.add is not None:
+        print '    ' + base_link_file
     root = ET2.Element('episodedetails')
     title_element = ET2.SubElement(root, 'title')
     title_element.text = title
@@ -149,7 +161,6 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     :param directory:
     :return: True: success, False: error
     """
-    print '    adding new series from ttvdb: ' + title
     ttvdb_base = 'http://www.thetvdb.com/'
     series_id = get_series_id(inetref)
     series_zip_file = os.path.join(config.ttvdb_zips_dir, title_safe + '_' + series_id + '.zip')
@@ -161,7 +172,7 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         print '        wrote ttvdb zip file: ' + ttvdb_zip_file
 
     # extract poster, banner, and fanart urls
-    print '    ttvdb zip exists, reading xml contents...'
+    # print '    ttvdb zip exists, reading xml contents...'
     z = zipfile.ZipFile(series_zip_file, 'r')
     for name in z.namelist():
         if name == 'en.xml':
@@ -179,12 +190,21 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         votes = series.find('RatingCount').text
         plot = series.find('Overview').text
         id = series.find('id').text
-        genre = category  # series.find('Genre').text
         premiered = series.find('FirstAired').text
         studio = series.find('Network').text
-        dateadded = series.find('added').text
+        date_added = series.find('added').text
 
-        write_series_nfo(directory, title, rating, votes, plot, id, genre, premiered, studio, dateadded)
+        # assemble genre string
+        genre_list = series.find('Genre').text
+        if genre_list is not None and '|' in genre_list:
+            genre_list = genre_list.strip('|')
+            if category not in genre_list:
+                genre_list += '|' + category
+            genre_list = genre_list.strip('|')
+
+        # print 'genre_list: ' + genre_list
+
+        write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
 
         # copy poster, banner, and fanart to link dir
         ttvdb_banners = ttvdb_base + 'banners/'
@@ -206,7 +226,6 @@ def new_series_from_tmdb(title, inetref, category, directory):
     :param directory:
     :return: True: success, False: error
     """
-    print '    adding new series from ttvdb: ' + title
     api_url = 'http://api.themoviedb.org/3'
     headers = {'Accept': 'application/json'}
 
@@ -233,6 +252,7 @@ def new_series_from_tmdb(title, inetref, category, directory):
     series_id = get_series_id(inetref)
     request = Request('{url}/movie/{id}?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
     mr = json.loads(urlopen(request).read())
+
     # #### POSTER #####
     poster_path = mr['poster_path']
     poster_url = "{0}{1}{2}".format(base_url, max_poster_size, poster_path)
@@ -251,12 +271,12 @@ def new_series_from_tmdb(title, inetref, category, directory):
     urllib.urlretrieve(backdrop_url, os.path.join(directory, 'fanart.jpg'))
     # #### BANNER #####
     # 758 x 140 banner from poster
-    img = Image.Image.open(cStringIO.StringIO(urllib.urlopen(poster_url).read()))
+    img = Image.open(cStringIO.StringIO(urllib.urlopen(poster_url).read()))
     # print 'w: ' + str(img.size[0]) + ' h: ' + str(img.size[1])
     banner_ratio = 758 / float(140)
     # shift crop down by 200 pixels
     box = (0, 220, img.size[0], int(round((img.size[0] / banner_ratio))) + 220)
-    img = img.crop(box).resize((758, 140), Image.Image.ANTIALIAS)
+    img = img.crop(box).resize((758, 140), Image.ANTIALIAS)
     img.save(os.path.join(directory, 'banner.jpg'))
 
     # print mr
@@ -267,18 +287,32 @@ def new_series_from_tmdb(title, inetref, category, directory):
     votes = str(mr['vote_count'])
     plot = str(mr['overview'])
     id = str(mr['id'])
-    genre = category
     premiered = str(mr['release_date'])
     studio = ''
-    dateadded = ''
+    date_added = ''
+
+    # assemble genre string
+    # print mr['genres']
+    genres = mr['genres']
+    if genres is not None:
+        genre_list = ''
+        for genre in genres:
+            name = genre['name']
+            if name is not None:
+                if not name.lower() == category.lower():
+                    genre_list += name + '|'
+        if category is not None:
+            genre_list += category
+        genre_list = str(genre_list).strip('|')
 
     # print 'rating: ' + rating
     # print 'votes: ' + votes
     # print 'plot: ' + plot
     # print 'id: ' + id
     # print 'premiered: ' + premiered
+    # print 'genre_list: ' + genre_list
 
-    write_series_nfo(directory, title, rating, votes, plot, id, genre, premiered, studio, dateadded)
+    write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
     return True
 
 # TODO: handle arguments for file, refresh nfos, etc.
@@ -294,6 +328,7 @@ parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', 
 # help='rebuild library from existing links')
 args = parser.parse_args()
 # print args.add
+#sys.exit(0)
 
 
 
@@ -305,8 +340,8 @@ def get_recorded_list():
     """
     # print "Looking up from MythTV: " + url + '/Dvr/GetRecordedList'
     tree = ET.parse(urllib.urlopen(BASE_URL + '/Dvr/GetRecordedList'))
-    # print Prettify(tree.getroot())
-    # quit()
+    #print prettify(tree.getroot())
+    #sys.exit(0)
     return tree.getroot()
 
 
@@ -327,7 +362,6 @@ def main():
     main routine
 
     """
-    global source_file
     for program in recorded_list.iter('Program'):
 
         # print the program for testing
@@ -396,16 +430,18 @@ def main():
 
         # process new show if found
         if not os.path.exists(target_link_dir):  # and 'Padawan' in titleSafe:
-            print "CREATING NEW SERIES... " + title
             os.makedirs(target_link_dir)
 
             # branch on inetref type
             result = True
             if 'ttvdb' in inetref:
+                print 'Adding new series from TTVDB: ' + title
                 result = new_series_from_ttvdb(title, title_safe, get_series_id(inetref), category, target_link_dir)
             if 'tmdb' in inetref:
+                print 'Adding new series from TMDB: ' + title
                 result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
 
+            #print "RESULT: " + str(result)
             if result is False:
                 print 'ERROR processing images for link_file:'
                 print '    ' + link_file
@@ -422,7 +458,7 @@ def main():
         if args.add is not None:
             break
 
-        return
+    return
 
 
 main()
