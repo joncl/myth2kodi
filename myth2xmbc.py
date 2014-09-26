@@ -65,9 +65,9 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     # add genres
     if genre_list is not None and '|' in genre_list:
         genre_list = genre_list.strip('|').split('|')
-        #print 'genre_list: ' + str(genre_list)
+        # print 'genre_list: ' + str(genre_list)
         for genre in genre_list:
-            #print 'genre: ' + genre
+            # print 'genre: ' + genre
             title_element = ET2.SubElement(root, 'genre')
             title_element.text = genre
     else:
@@ -166,10 +166,10 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     series_zip_file = os.path.join(config.ttvdb_zips_dir, title_safe + '_' + series_id + '.zip')
     if not os.path.exists(series_zip_file):
         # zip does not exist, download it
-        print '    downloading ttvdb zip file...'
+        #print '    downloading ttvdb zip file...'
         ttvdb_zip_file = ttvdb_base + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
         urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
-        print '        wrote ttvdb zip file: ' + ttvdb_zip_file
+        #print '        wrote ttvdb zip file: ' + ttvdb_zip_file
 
     # extract poster, banner, and fanart urls
     # print '    ttvdb zip exists, reading xml contents...'
@@ -315,19 +315,21 @@ def new_series_from_tmdb(title, inetref, category, directory):
     write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
     return True
 
-# TODO: handle arguments for file, refresh nfos, etc.
+# TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
 parser = argparse.ArgumentParser(__file__, description='myth2xbmc... a script for linking XBMC to a MythTV backend.')
 parser.add_argument('-a', '--add', dest='add', action='store',
                     help="full path to file name of new recording, used for a MythTV user job upon 'Recording Finished'")
-parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
-                    help='refresh all nfo files')
 parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', default=False,
                     help='print new recordings not yet linked, mostly used for testing purposes')
+#parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
+#                    help='refresh all nfo files')
+#parser.add_argument('-c', '--clean', dest='clean', action='store_true', default=False,
+#                    help='remove all references to deleted MythTV recordings')
 # parser.add_argument('--rebuild-library', dest='rebuild_library', action='store_true', default=False,
 # help='rebuild library from existing links')
 args = parser.parse_args()
-# print args.add
+#print args.add
 #sys.exit(0)
 
 
@@ -340,7 +342,7 @@ def get_recorded_list():
     """
     # print "Looking up from MythTV: " + url + '/Dvr/GetRecordedList'
     tree = ET.parse(urllib.urlopen(BASE_URL + '/Dvr/GetRecordedList'))
-    #print prettify(tree.getroot())
+    # print prettify(tree.getroot())
     #sys.exit(0)
     return tree.getroot()
 
@@ -362,7 +364,16 @@ def main():
     main routine
 
     """
+    series_lib = []
+    series_new_count = 0
+    episode_count = 0
+    episode_new_count = 0
+    special_count = 0
+    special_new_count = 0
+    error_lib = []
+
     for program in recorded_list.iter('Program'):
+        is_special = False
 
         # print the program for testing
         # print Prettify(program)
@@ -399,11 +410,26 @@ def main():
         if season.zfill(2) == "00" and episode == "00":
             episode_name = episode_name + " - " + record_date
             airdate = record_date  # might be needed so specials get sorted with recognized episodes
+            is_special = True
 
         # set target link dir
         target_link_dir = os.path.join(config.symlinks_dir, title_safe)
         link_file = os.path.join(target_link_dir, episode_name) + file_extension
-        #print 'LINK FILE = ' + link_file
+        # print 'LINK FILE = ' + link_file
+
+        # update series library and count
+        if not series_lib or title_safe not in series_lib:
+            series_lib.append(title_safe)
+
+        # update episode/special library and count
+        if is_special is True:
+            special_count += 1
+            #   if not special_lib or base_file_name not in special_lib:
+            #       special_lib.append(base_file_name);
+        else:
+            episode_count += 1
+        #    if not episode_lib or base_file_name not in episode_lib:
+        #        episode_lib.append(base_file_name)
 
         # skip if link already exists
         if os.path.exists(link_file) or os.path.islink(link_file):
@@ -428,9 +454,11 @@ def main():
             print '   ' + source_file
             continue
 
+
         # process new show if found
         if not os.path.exists(target_link_dir):  # and 'Padawan' in titleSafe:
             os.makedirs(target_link_dir)
+            series_new_count += 1
 
             # branch on inetref type
             result = True
@@ -443,6 +471,7 @@ def main():
 
             #print "RESULT: " + str(result)
             if result is False:
+                error_lib.append(link_file)
                 print 'ERROR processing images for link_file:'
                 print '    ' + link_file
                 continue
@@ -454,9 +483,36 @@ def main():
         # write the episode nfo file
         write_episode_nfo(title, season, episode, plot, airdate, os.path.splitext(link_file)[0])
 
+        # count new episode or special
+        if is_special is True:
+            special_new_count += 1
+        else:
+            episode_new_count += 1
+
         # if adding a new recording, stop looking
         if args.add is not None:
             break
+
+    print ''
+    print '   --------------------------------'
+    print '   |         |  Series:   ' + str(len(series_lib))
+    print '   |  Total  |  Episodes: ' + str(episode_count)
+    print '   |         |  Specials: ' + str(special_count)
+    print '   |-------------------------------'
+    print '   |         |  Series:   ' + str(series_new_count)
+    print '   |   New   |  Episodes: ' + str(episode_new_count)
+    print '   |         |  Specials: ' + str(special_new_count)
+    print '   --------------------------------'
+    print '   |  Errors: ' + str(len(error_lib))
+    if len(error_lib) > 0:
+        print ''
+        print 'Error processing images for these link_files:'
+        print ''
+        for lf in error_lib:
+            print lf
+    else:
+        print '   --------------------------------'
+    print ''
 
     return
 
