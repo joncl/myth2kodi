@@ -1,7 +1,7 @@
-myth2xbmc
+myth2kodi
 =========
 
-A script for generating a library of TV Show recordings for XBMC from a MythTV backend. Recordings are symlinked, and metadata and image links (posters, fanart, and banners) for each series are pulled from either TheTVDB or TheMovieDB depending on the "inetref" value in MythTV. "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the same series for easy navigation in XBMC.
+A script for generating a library of TV Show recordings for XBMC(Kodi) from a MythTV backend. Recordings are symlinked, and metadata and image links (posters, fanart, and banners) for each series are pulled from either TheTVDB or TheMovieDB depending on the "inetref" value in MythTV. "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the same series for easy navigation in XBMC(Kodi).
 
 For further details and setup notes, please see my post on XBMC Community Forum:
 http://forum.xbmc.org/showthread.php?tid=205009
