@@ -169,7 +169,7 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         #print '    downloading ttvdb zip file...'
         ttvdb_zip_file = ttvdb_base + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
         urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
-        #print '        wrote ttvdb zip file: ' + ttvdb_zip_file
+        #print '        downloading TTVDB zip file to: ' + ttvdb_zip_file
 
     # extract poster, banner, and fanart urls
     # print '    ttvdb zip exists, reading xml contents...'
@@ -518,3 +518,5 @@ def main():
 
 
 main()
+
+sys.exit(0)

@@ -8,13 +8,13 @@ host_port = "6544"
 mythtv_recording_dirs = ["/pool/mythtv/recordings-kids/"]
 
 # Path to write symlinks
-symlinks_dir = "/pool/myth2xbmc/recordings/"
+symlinks_dir = "/pool/myth2kodi/recordings/"
 
 # API key for TheTVDB
 ttvdb_key = "<your ttvdb key>"
 
 # Path to store TheTVDB series zips
-ttvdb_zips_dir = "/pool/myth2xbmc/ttvdb/"
+ttvdb_zips_dir = "/pool/myth2kodi/ttvdb/"
 
 # API key for TheMovieDB
 tmdb_key = "<your tmdb key>"
