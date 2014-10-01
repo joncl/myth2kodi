@@ -18,3 +18,9 @@ ttvdb_zips_dir = "/pool/myth2kodi/ttvdb/"
 
 # API key for TheMovieDB
 tmdb_key = "<your tmdb key>"
+
+# MythTV database username, password, and database name
+user = "mythtv"
+passwd = "mythtv"
+db = "mythconverg"
+

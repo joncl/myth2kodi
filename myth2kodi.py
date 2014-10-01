@@ -13,11 +13,25 @@ import cStringIO
 from urllib2 import Request, urlopen
 import json
 import sys
+import MySQLdb
 
 import config
 
 
 BASE_URL = "http://" + config.hostname + ":" + config.host_port
+db = None
+
+
+def get_db_cursor():
+    global db
+    if db is None:
+        db = MySQLdb.connect('localhost', config.user, config.passwd, config.db)
+    return db.cursor()
+
+def close_db():
+    if db is not None:
+        db.cursor().close()
+        db.close()
 
 
 def log_missing_inet_ref(title):
@@ -85,7 +99,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     return
 
 
-def write_episode_nfo(title, season, episode, plot, airdate, base_link_file):
+def write_episode_nfo(title, season, episode, plot, airdate, playcount, base_link_file):
     """
     write nfo file for episode
     :param title:
@@ -109,6 +123,8 @@ def write_episode_nfo(title, season, episode, plot, airdate, base_link_file):
     plot_element.text = plot
     airdate_element = ET2.SubElement(root, 'aired')
     airdate_element.text = airdate
+    playcount_element = ET2.SubElement(root, 'playcount')
+    playcount_element.text = playcount
     tree = ET2.ElementTree(root)
     tree.write(base_link_file + '.nfo', pretty_print=True, encoding='UTF-8', xml_declaration=True)
     return
@@ -166,10 +182,10 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     series_zip_file = os.path.join(config.ttvdb_zips_dir, title_safe + '_' + series_id + '.zip')
     if not os.path.exists(series_zip_file):
         # zip does not exist, download it
-        #print '    downloading ttvdb zip file...'
+        # print '    downloading ttvdb zip file...'
         ttvdb_zip_file = ttvdb_base + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
         urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
-        #print '        downloading TTVDB zip file to: ' + ttvdb_zip_file
+        # print '        downloading TTVDB zip file to: ' + ttvdb_zip_file
 
     # extract poster, banner, and fanart urls
     # print '    ttvdb zip exists, reading xml contents...'
@@ -317,19 +333,22 @@ def new_series_from_tmdb(title, inetref, category, directory):
 
 # TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
-parser = argparse.ArgumentParser(__file__, description='myth2xbmc... a script for linking XBMC to a MythTV backend.')
+parser = argparse.ArgumentParser(__file__,
+                                 description='myth2kodi... a script for linking XBMC(Kodi) to a MythTV backend.')
 parser.add_argument('-a', '--add', dest='add', action='store',
                     help="full path to file name of new recording, used for a MythTV user job upon 'Recording Finished'")
 parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', default=False,
                     help='print new recordings not yet linked, mostly used for testing purposes')
-#parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
-#                    help='refresh all nfo files')
+parser.add_argument('--show-xml', dest='source_xml', action='store',
+                    help='show source xml for a title that contains the given query')
+# parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
+# help='refresh all nfo files')
 #parser.add_argument('-c', '--clean', dest='clean', action='store_true', default=False,
 #                    help='remove all references to deleted MythTV recordings')
 # parser.add_argument('--rebuild-library', dest='rebuild_library', action='store_true', default=False,
 # help='rebuild library from existing links')
 args = parser.parse_args()
-#print args.add
+#print args.source_xml
 #sys.exit(0)
 
 
@@ -394,15 +413,43 @@ def main():
         inetref = program.find('Inetref').text
         category = program.find('Category').text
         record_date = re.findall('\d*-\d*-\d*', program.find('StartTime').text)[0]
+        program_id = program.find('ProgramId').text
 
+        # be sure we have an inetref
         if inetref is None or inetref == '':
             print 'MISSING INETREF!: ' + title
             # LogMissingInetref()
             continue
 
+        # be sure we have a program_id
+        if program_id is None or program_id == '':
+            print 'MISSING PROGRAMID! ' + title
+            continue
+
+        # lookup watched flag from db
+        try:
+           cursor = get_db_cursor()
+           sql = 'select watched from recorded where programid = "' + program_id + '";'
+           cursor.execute(sql)
+           results = cursor.fetchone()
+           playcount = re.findall('\d', str(results))[0]
+           #for row in results:
+           #    print str(row)
+
+        except(AttributeError, MySQLdb.OperationalError):
+            print AttributeError.message
+            print 'Error: unable to fetch data'
+
         # parse show name for file system safe name
         title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
         title_safe = re.sub(' +', '_', title_safe)
+
+        # print program xml if --show-xml arg is given
+        if args.source_xml is not None:
+            if str(args.source_xml) in title_safe:
+                print prettify(program)
+            else:
+                continue
 
         # form the file name
         episode_name = title_safe + " - " + season + "x" + episode + " - " + base_file_name
@@ -481,7 +528,7 @@ def main():
         os.symlink(source_file, link_file)
 
         # write the episode nfo file
-        write_episode_nfo(title, season, episode, plot, airdate, os.path.splitext(link_file)[0])
+        write_episode_nfo(title, season, episode, plot, airdate, playcount, os.path.splitext(link_file)[0])
 
         # count new episode or special
         if is_special is True:
@@ -519,4 +566,5 @@ def main():
 
 main()
 
+close_db()
 sys.exit(0)

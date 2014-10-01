@@ -6,8 +6,10 @@ A script for generating a library of TV Show recordings for XBMC(Kodi) from a My
 For further details and setup notes, please see my post on XBMC Community Forum:
 http://forum.xbmc.org/showthread.php?tid=205009
 
-![Alt text](/../Images/18.jpg?raw=true "Optional Title")
+![Alt text](/../Images/18.jpg?raw=true "TV Show")
 
-![Alt text](/../Images/19.jpg?raw=true "Optional Title")
+![Alt text](/../Images/19.jpg?raw=true "Posters and fanart view")
+
+![Alt text](/../Images/20.jpg?raw=true "Series view")
 
 Credits: some code originally borrowed from another project **mythPLEX**: [thread](https://forums.plex.tv/index.php/topic/118748-connect-your-mythtv-recordings-to-plex/), [on GitHub](https://github.com/ascagnel/mythPlex).
