@@ -5,14 +5,12 @@ import os
 import xml.etree.cElementTree as ET
 from lxml import etree as ET2
 import xml.dom.minidom as dom
-import urllib
 import urllib2
 import re
 import argparse
 import zipfile
 from PIL import Image
 import cStringIO
-from urllib2 import Request, urlopen
 import json
 import sys
 import MySQLdb
@@ -210,9 +208,9 @@ def get_series_id(inetref):
     return re.findall('[\d]+$', inetref)[0]
 
 
-def download_image(image_url, target_file='', return_response=False):
+def download_file(file_url, target_file='', return_response=False):
     try:
-        req = urllib2.Request(image_url)
+        req = urllib2.Request(file_url)
         response = urllib2.urlopen(req)
         if return_response is True:
             return response
@@ -254,10 +252,10 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     if not os.path.exists(series_zip_file):
         # zip does not exist, download it
         # print '    downloading ttvdb zip file...'
-        log_info('zip does not exist, downloading ttvdb zip file...')
+        log_info('TTVDB zip does not exist, downloading ttvdb zip file to: ' + series_zip_file)
         ttvdb_zip_file = ttvdb_base_url + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
-        urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
-        # print '        downloading TTVDB zip file to: ' + ttvdb_zip_file
+        download_file(ttvdb_zip_file, series_zip_file)
+        # urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
 
     # extract poster, banner, and fanart urls
     # print '    ttvdb zip exists, reading xml contents...'
@@ -305,15 +303,15 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         fanart_url = ttvdb_banners_url + series.find('fanart').text
 
         log_info('downloading poster from: ' + poster_url)
-        if not download_image(poster_url, os.path.join(directory, 'poster.jpg')):
+        if not download_file(poster_url, os.path.join(directory, 'poster.jpg')):
             return False
 
         log_info('downloading banner from: ' + banner_url)
-        if not download_image(banner_url, os.path.join(directory, 'banner.jpg')):
+        if not download_file(banner_url, os.path.join(directory, 'banner.jpg')):
             return False
 
         log_info('downloading fanart from: ' + fanart_url)
-        if not download_image(fanart_url, os.path.join(directory, 'fanart.jpg')):
+        if not download_file(fanart_url, os.path.join(directory, 'fanart.jpg')):
             return False
 
         # urllib.urlretrieve(ttvdb_banners_url + poster, os.path.join(directory, 'poster.jpg'))
@@ -334,8 +332,9 @@ def new_series_from_tmdb(title, inetref, category, directory):
     api_url = 'http://api.themoviedb.org/3'
     headers = {'Accept': 'application/json'}
 
-    request = Request('{url}/configuration?api_key={key}'.format(url=api_url, key=config.tmdb_key), headers=headers)
-    cr = json.loads(urlopen(request).read())
+    request = urllib2.Request('{url}/configuration?api_key={key}'.format(url=api_url, key=config.tmdb_key),
+                              headers=headers)
+    cr = json.loads(urllib2.urlopen(request).read())
 
     # base url
     base_url = cr['images']['base_url']
@@ -355,8 +354,8 @@ def new_series_from_tmdb(title, inetref, category, directory):
     max_backdrop_size = max(backdrop_sizes, key=size_str_to_int)
 
     series_id = get_series_id(inetref)
-    request = Request('{url}/movie/{id}?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
-    mr = json.loads(urlopen(request).read())
+    request = urllib2.Request('{url}/movie/{id}?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
+    mr = json.loads(urllib2.urlopen(request).read())
 
     # #### POSTER #####
     log_info('Getting path to poster...')
@@ -375,16 +374,16 @@ def new_series_from_tmdb(title, inetref, category, directory):
 
     # save images
     # urllib.urlretrieve(poster_url, os.path.join(directory, 'poster.jpg'))
-    #urllib.urlretrieve(backdrop_url, os.path.join(directory, 'fanart.jpg'))
-    if download_image(poster_url, os.path.join(directory, 'poster.jpg')) is False:
+    # urllib.urlretrieve(backdrop_url, os.path.join(directory, 'fanart.jpg'))
+    if download_file(poster_url, os.path.join(directory, 'poster.jpg')) is False:
         return False
-    if download_image(backdrop_url, os.path.join(directory, 'fanart.jpg')) is False:
+    if download_file(backdrop_url, os.path.join(directory, 'fanart.jpg')) is False:
         return False
 
     # #### BANNER #####
     # make a 758 x 140 banner from poster
     log_info('Making 758 x 140 banner image from poster...')
-    response = download_image(poster_url, '', True)
+    response = download_file(poster_url, '', True)
     if response is None:
         return False
     img = Image.open(cStringIO.StringIO(response.read()))
@@ -431,12 +430,23 @@ def new_series_from_tmdb(title, inetref, category, directory):
     write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
     return True
 
-# TODO: handle arguments refresh nfos
-# TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
+
 parser = argparse.ArgumentParser(__file__,
-                                 description='myth2kodi... A script to enable viewing of MythTV recordings in XBMC(Kodi)')
+                                 description='myth2kodi... A script to enable viewing of MythTV recordings in XBMC(Kodi)\n' +
+                                             '\n' +
+                                             'On GitHub: https://github.com/joncl/myth2kodi\n' +
+                                             '\n' +
+                                             'NOTES:\n' +
+                                             ' - At least one argument is required.\n' +
+                                             ' - Use --scan-all or --comskip-all separately to either scan for new MythTV recordings or\n' +
+                                             '   scan for commercials in existing MythTV recordings already linked.\n' +
+                                             ' - Create a MythTV user job with -add <path to MythTV mpg> to add a new MythTV recording.\n' +
+                                             '   The new recording will be scanned for commercials after it is added.\n',
+                                 formatter_class=argparse.RawTextHelpFormatter)
 parser.add_argument('-a', '--add', dest='add', action='store', metavar='<path to mpg file>',
                     help="Full path to file name of new recording, used for a MythTV user job upon 'Recording Finished'.")
+parser.add_argument('-s', '--scan-all', dest='scan_all', action='store_true', default=False,
+                    help='Scan all MythTV recordings and add any that are missing.')
 parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', default=False,
                     help='Print new recordings not yet linked, mostly used for testing purposes.')
 parser.add_argument('--show-xml', dest='source_xml', action='store', metavar='<mpg file name match>',
@@ -452,12 +462,19 @@ parser.add_argument('--match-title', dest='match_title', action='store', metavar
 parser.add_argument('--print-config', dest='print_config', action='store_true',
                     help='Prints all the config variables and values in the config.py file.')
 
+# TODO: handle arguments refresh nfos
+# TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
 # parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
 # help='refresh all nfo files')
 # parser.add_argument('-c', '--clean', dest='clean', action='store_true', default=False,
 # help='remove all references to deleted MythTV recordings')
 # parser.add_argument('--rebuild-library', dest='rebuild_library', action='store_true', default=False,
 # help='rebuild library from existing links')
+
+if len(sys.argv) == 1:
+    parser.error('At lease one argument is required. Use -h or --help for details.')
+    sys.exit(1)
+
 args = parser.parse_args()
 # print args.source_xml
 
@@ -485,7 +502,7 @@ def get_recorded_list():
     :return: xml parsed recorded list
     """
     # print "Looking up from MythTV: " + url + '/Dvr/GetRecordedList'
-    tree = ET.parse(urllib.urlopen(BASE_URL + '/Dvr/GetRecordedList'))
+    tree = ET.parse(urllib2.urlopen(BASE_URL + '/Dvr/GetRecordedList'))
     # print prettify(tree.getroot())
     # sys.exit(0)
     return tree.getroot()
@@ -543,7 +560,7 @@ def comskip_file(path, file):
 
 def comskip_all():
     for root, dirs, files in os.walk(config.symlinks_dir):
-        print root
+        # print root
         # path = root.split('/')
         # print path
         # print (len(path) - 1) *'---' , os.path.basename(root)
@@ -783,7 +800,7 @@ try:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
-    else:
+    elif args.scan_all is True:
         if not main():
             write_log()
 except Exception, e:
