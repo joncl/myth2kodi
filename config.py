@@ -20,7 +20,9 @@ ttvdb_zips_dir = "/pool/myth2kodi/ttvdb/"
 tmdb_key = "<your tmdb key>"
 
 # MythTV database username, password, and database name
-user = "mythtv"
-passwd = "mythtv"
-db = "mythconverg"
+db_user = "mythtv"
+db_passwd = "mythtv"
+db_name = "mythconverg"
 
+# Comskip location
+comskip_exe = "/home/mythtv/comskip/comskip.exe"

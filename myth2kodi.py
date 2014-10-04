@@ -1,10 +1,12 @@
 #! /usr/bin/env python
+import httplib
 
 import os
 import xml.etree.cElementTree as ET
 from lxml import etree as ET2
 import xml.dom.minidom as dom
 import urllib
+import urllib2
 import re
 import argparse
 import zipfile
@@ -15,11 +17,13 @@ import json
 import sys
 import MySQLdb
 import time
+import subprocess
 
 import config
 
 
 BASE_URL = "http://" + config.hostname + ":" + config.host_port
+THIS_DIR = os.getcwd()
 db = None
 log_content = ''
 
@@ -31,19 +35,29 @@ def timestamp():
     return time.strftime('%Y%_m%d_%H%M%S', localtime) + '.' + ms
 
 
-def log(content):
+def log_info(content):
+    log(content, 'INFO')
+
+
+def log_error(content):
+    log(content, 'ERROR')
+
+
+def log(content, type):
     global log_content
-    log_content = '{}{} {}\n'.format(log_content, timestamp(), content.replace('^', '                   '))
+    log_content = '{}{} {}: {}\n'.format(log_content, timestamp(), type.rjust(5),
+                                         content.replace('^', ' ' * 31))
 
 
 def get_db_cursor():
     global db
     if db is None:
-        db = MySQLdb.connect('localhost', config.user, config.passwd, config.db)
+        db = MySQLdb.connect('localhost', config.db_user, config.db_passwd, config.db_name)
     return db.cursor()
 
 
 def close_db():
+    global db
     if db is not None:
         db.cursor().close()
         db.close()
@@ -79,7 +93,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     :param date_added:
     :return:
     """
-    log('            Writing series nfo file...')
+    log_info('Writing series nfo file...')
     root = ET2.Element('tvshow')
     title_element = ET2.SubElement(root, 'title')
     title_element.text = title
@@ -150,10 +164,10 @@ def write_comskip(base_link_file, mark_dict):
     if not len(mark_dict):
         return
 
-    c = 'FILE PROCESSING COMPLETE\n'
-    c = c + '------------------------\n'
+    c = 'FILE PROCESSING COMPLETE\r\n'
+    c = c + '------------------------\r\n'
     for start, end in mark_dict.iteritems():
-        c = c + '{}   {}\n'.format(str(start), str(end))
+        c = c + '{} {}\r\n'.format(str(start), str(end))
 
     f = open(base_link_file + '.txt', 'a')
     f.write(c)
@@ -196,6 +210,33 @@ def get_series_id(inetref):
     return re.findall('[\d]+$', inetref)[0]
 
 
+def download_image(image_url, target_file='', return_response=False):
+    try:
+        req = urllib2.Request(image_url)
+        response = urllib2.urlopen(req)
+        if return_response is True:
+            return response
+        output = open(target_file, 'wb')
+        output.write(response.read())
+        output.close()
+    except urllib2.HTTPError, e:
+        log_error('HTTPError = ' + str(e.code))
+        return False
+    except urllib2.URLError, e:
+        log_error('URLError = ' + str(e.reason))
+        return False
+    except httplib.HTTPException, e:
+        log_error('HTTPException')
+        return False
+    except Exception:
+        import traceback
+
+        log_error('generic exception: ' + traceback.format_exc())
+        return False
+    else:
+        return True
+
+
 def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     # store series zip from thetvdb.com
     """
@@ -207,20 +248,20 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     :param directory:
     :return: True: success, False: error
     """
-    ttvdb_base = 'http://www.thetvdb.com/'
+    ttvdb_base_url = 'http://www.thetvdb.com/'
     series_id = get_series_id(inetref)
     series_zip_file = os.path.join(config.ttvdb_zips_dir, title_safe + '_' + series_id + '.zip')
     if not os.path.exists(series_zip_file):
         # zip does not exist, download it
         # print '    downloading ttvdb zip file...'
-        log('^        zip does not exist, downloading ttvdb zip file...')
-        ttvdb_zip_file = ttvdb_base + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
+        log_info('zip does not exist, downloading ttvdb zip file...')
+        ttvdb_zip_file = ttvdb_base_url + 'api/' + config.ttvdb_key + '/series/' + series_id + '/all/en.zip'
         urllib.urlretrieve(ttvdb_zip_file, series_zip_file)
         # print '        downloading TTVDB zip file to: ' + ttvdb_zip_file
 
     # extract poster, banner, and fanart urls
     # print '    ttvdb zip exists, reading xml contents...'
-    log('        ttvdb zip exists, reading xml contents...')
+    log_info('ttvdb zip exists, reading xml contents...')
     z = zipfile.ZipFile(series_zip_file, 'r')
     for name in z.namelist():
         if name == 'en.xml':
@@ -228,10 +269,10 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
             break
     if not os.path.exists('/tmp/en.xml'):
         print '    en.xml not found in series zip file at /tmp/en.xml'
-        log('        ERROR: en.xml not found in series zip file at /tmp/en.xml')
+        log_error('en.xml not found in series zip file at /tmp/en.xml')
         return False
     else:
-        log('^        Reading en.xml...')
+        log_info('Reading en.xml...')
         tree = ET.parse('/tmp/en.xml')
         series_data = tree.getroot()
         series = series_data.find('Series')
@@ -257,14 +298,27 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         write_series_nfo(directory, title, rating, votes, plot, id, genre_list, premiered, studio, date_added)
 
         # copy poster, banner, and fanart to link dir
-        log('        Retrieving poster, fanart, and banner...')
-        ttvdb_banners = ttvdb_base + 'banners/'
-        poster = series.find('poster').text
-        banner = series.find('banner').text
-        fanart = series.find('fanart').text
-        urllib.urlretrieve(ttvdb_banners + poster, os.path.join(directory, 'poster.jpg'))
-        urllib.urlretrieve(ttvdb_banners + banner, os.path.join(directory, 'banner.jpg'))
-        urllib.urlretrieve(ttvdb_banners + fanart, os.path.join(directory, 'fanart.jpg'))
+        log_info('Retrieving poster, fanart, and banner...')
+        ttvdb_banners_url = ttvdb_base_url + 'banners/'
+        poster_url = ttvdb_banners_url + series.find('poster').text
+        banner_url = ttvdb_banners_url + series.find('banner').text
+        fanart_url = ttvdb_banners_url + series.find('fanart').text
+
+        log_info('downloading poster from: ' + poster_url)
+        if not download_image(poster_url, os.path.join(directory, 'poster.jpg')):
+            return False
+
+        log_info('downloading banner from: ' + banner_url)
+        if not download_image(banner_url, os.path.join(directory, 'banner.jpg')):
+            return False
+
+        log_info('downloading fanart from: ' + fanart_url)
+        if not download_image(fanart_url, os.path.join(directory, 'fanart.jpg')):
+            return False
+
+        # urllib.urlretrieve(ttvdb_banners_url + poster, os.path.join(directory, 'poster.jpg'))
+        # urllib.urlretrieve(ttvdb_banners_url + banner, os.path.join(directory, 'banner.jpg'))
+        # urllib.urlretrieve(ttvdb_banners_url + fanart, os.path.join(directory, 'fanart.jpg'))
         return True
 
 
@@ -305,28 +359,35 @@ def new_series_from_tmdb(title, inetref, category, directory):
     mr = json.loads(urlopen(request).read())
 
     # #### POSTER #####
-    log('^        Getting path to poster...')
+    log_info('Getting path to poster...')
     poster_path = mr['poster_path']
-    poster_url = "{0}{1}{2}".format(base_url, max_poster_size, poster_path)
-    # #### BACKDROP #####
-    log('^        Getting path to fanart...')
+    poster_url = '{0}{1}{2}'.format(base_url, max_poster_size, poster_path)
+    # #### FANART #####
+    log_info('Getting path to fanart...')
     backdrop_path = mr['backdrop_path']
-    backdrop_url = "{0}{1}{2}".format(base_url, max_backdrop_size, backdrop_path)
+    backdrop_url = '{0}{1}{2}'.format(base_url, max_backdrop_size, backdrop_path)
 
     # print '    poster_path: ' + poster_path
     # print '    backdrop_path: ' + backdrop_path
 
-    request = Request('{url}/movie/{id}/images?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
-    ir = json.loads(urlopen(request).read())
+    # request = Request('{url}/movie/{id}/images?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
+    # ir = json.loads(urlopen(request).read())
 
     # save images
-    urllib.urlretrieve(poster_url, os.path.join(directory, 'poster.jpg'))
-    urllib.urlretrieve(backdrop_url, os.path.join(directory, 'fanart.jpg'))
+    # urllib.urlretrieve(poster_url, os.path.join(directory, 'poster.jpg'))
+    #urllib.urlretrieve(backdrop_url, os.path.join(directory, 'fanart.jpg'))
+    if download_image(poster_url, os.path.join(directory, 'poster.jpg')) is False:
+        return False
+    if download_image(backdrop_url, os.path.join(directory, 'fanart.jpg')) is False:
+        return False
 
     # #### BANNER #####
-    # 758 x 140 banner from poster
-    log('^        Making 758x140 banner image from poster...')
-    img = Image.open(cStringIO.StringIO(urllib.urlopen(poster_url).read()))
+    # make a 758 x 140 banner from poster
+    log_info('Making 758 x 140 banner image from poster...')
+    response = download_image(poster_url, '', True)
+    if response is None:
+        return False
+    img = Image.open(cStringIO.StringIO(response.read()))
     # print 'w: ' + str(img.size[0]) + ' h: ' + str(img.size[1])
     banner_ratio = 758 / float(140)
     # shift crop down by 200 pixels
@@ -373,15 +434,24 @@ def new_series_from_tmdb(title, inetref, category, directory):
 # TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
 parser = argparse.ArgumentParser(__file__,
-                                 description='myth2kodi... a script for linking XBMC(Kodi) to a MythTV backend.')
-parser.add_argument('-a', '--add', dest='add', action='store',
-                    help="full path to file name of new recording, used for a MythTV user job upon 'Recording Finished'")
+                                 description='myth2kodi... A script to enable viewing of MythTV recordings in XBMC(Kodi)')
+parser.add_argument('-a', '--add', dest='add', action='store', metavar='<path to mpg file>',
+                    help="Full path to file name of new recording, used for a MythTV user job upon 'Recording Finished'.")
 parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', default=False,
-                    help='print new recordings not yet linked, mostly used for testing purposes')
-parser.add_argument('--show-xml', dest='source_xml', action='store',
-                    help='show source xml for a title that contains the given query')
+                    help='Print new recordings not yet linked, mostly used for testing purposes.')
+parser.add_argument('--show-xml', dest='source_xml', action='store', metavar='<mpg file name match>',
+                    help='Show source xml for an episode that contains any portion of the given mpg file name.')
 parser.add_argument('-l', '--log', dest='log', action='store_true', default=False,
-                    help='write a log file (otherwise a log file is created only when an error occurs)')
+                    help='Write a log file (otherwise a log file is created only when an error occurs).')
+parser.add_argument('--comskip-all', dest='comskip_all', action='store_true', default=False,
+                    help='Run comskip on all video files found recursively in the "symlinks_dir" path from config.py.')
+parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', default=False,
+                    help='Turn off comskip. Does nothing when --comskip-all is given.')
+parser.add_argument('--match-title', dest='match_title', action='store', metavar='<title match>',
+                    help='Process only series matching any portion of the given title')
+parser.add_argument('--print-config', dest='print_config', action='store_true',
+                    help='Prints all the config variables and values in the config.py file.')
+
 # parser.add_argument('-r', '--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
 # help='refresh all nfo files')
 # parser.add_argument('-c', '--clean', dest='clean', action='store_true', default=False,
@@ -390,8 +460,22 @@ parser.add_argument('-l', '--log', dest='log', action='store_true', default=Fals
 # help='rebuild library from existing links')
 args = parser.parse_args()
 # print args.source_xml
-# sys.exit(0)
 
+
+def print_config():
+    print ''
+    print 'config.py:'
+    print '    hostname:            ' + str(config.hostname)
+    print '    host_port:           ' + str(config.host_port)
+    print '    myth_recording_dirs: ' + str(config.mythtv_recording_dirs)
+    print '    symlinks_dir:        ' + str(config.symlinks_dir)
+    print '    ttvdb_key:           ' + str(config.ttvdb_key)
+    print '    ttvdb_zips_dir:      ' + str(config.ttvdb_zips_dir)
+    print '    tmdb_key:            ' + str(config.tmdb_key)
+    print '    db_user:             ' + str(config.db_user)
+    print '    db_passwd:           ' + str(config.db_passwd)
+    print '    db_name:             ' + str(config.db_name)
+    print ''
 
 
 def get_recorded_list():
@@ -403,7 +487,7 @@ def get_recorded_list():
     # print "Looking up from MythTV: " + url + '/Dvr/GetRecordedList'
     tree = ET.parse(urllib.urlopen(BASE_URL + '/Dvr/GetRecordedList'))
     # print prettify(tree.getroot())
-    #sys.exit(0)
+    # sys.exit(0)
     return tree.getroot()
 
 
@@ -422,12 +506,49 @@ check_args()
 def write_log(msg=None):
     global log_content
     log_content += '\n\n'
-    f = open('myth2kodi.log', 'a')
+    f = open('myth2kodi.log', 'w')
     if msg is None:
         f.write(log_content)
     else:
         f.write(log_content + '\n\n' + str(msg))
     f.close()
+
+
+def comskip_file(path, file):
+    if file.lower().endswith('.mpg'):
+        base_file = os.path.splitext(file)[0]
+        txt_file = os.path.join(path, base_file + '.txt')
+        log_file = os.path.join(path, base_file + '.log')
+        logo_file = os.path.join(path, base_file + '.logo.txt')
+        edl_file = os.path.join(path, base_file + '.edl')
+
+        # if txt file exists, then skip this mpg
+        if os.path.exists(txt_file):
+            return
+
+        # run comskip
+        base_comskip_dir = os.path.dirname(config.comskip_exe)
+        os.chdir(base_comskip_dir)
+        subprocess.call('wine {} "{}"'.format(config.comskip_exe, os.path.join(path, file)), shell=True)
+        os.chdir(THIS_DIR)
+
+        # remove extra files
+        if os.path.exists(log_file):
+            os.remove(log_file)
+        if os.path.exists(logo_file):
+            os.remove(logo_file)
+        if os.path.exists(edl_file):
+            os.rename(edl_file, edl_file + '.bak')
+
+
+def comskip_all():
+    for root, dirs, files in os.walk(config.symlinks_dir):
+        print root
+        # path = root.split('/')
+        # print path
+        # print (len(path) - 1) *'---' , os.path.basename(root)
+        for file in files:
+            comskip_file(root, file)
 
 
 def main():
@@ -454,7 +575,7 @@ def main():
         if args.add is not None:
             if not base_file_name == get_base_filename_from(args.add):
                 continue
-            log('Adding new file by "--add" argument: {}'.format(args.add))
+            log_info('Adding new file by "--add" argument: {}'.format(args.add))
 
         # collect program attributes
         title = program.find('Title').text
@@ -470,26 +591,36 @@ def main():
         chan_id = program.find('Channel/ChanId').text
         start_time = program.find('StartTime').text.replace('T', ' ').replace('Z', '')
 
-        #if "Johnny" not in title:
-        #    continue
+        # check if we are matching on a title
+        if args.match_title is not None:
+            if args.match_title not in title:
+                continue
 
-        log('PROCESSING PROGRAM:\n^   title: {}\n^   filename: {}\n^   program id: {}'.format(title,
-                                                                                              base_file_name + file_extension,
-                                                                                              program_id))
+        # print program xml if --show-xml arg is given
+        if args.source_xml is not None:
+            if str(args.source_xml) in base_file_name:
+                print prettify(program)
+                sys.exit(0)
+            else:
+                continue
+
+        log_info('PROCESSING PROGRAM:\n^title: {}\n^filename: {}\n^program id: {}'.format(title,
+                                                                                          base_file_name + file_extension,
+                                                                                          program_id))
 
         # be sure we have an inetref
         if inetref is None or inetref == '':
-            log('^    MISSING INETREF!: ' + title)
+            log_error('MISSING INETREF!: ' + title)
             continue
 
         # be sure we have a program_id
         if program_id is None or program_id == '':
-            log('^    MISSING PROGRAMID! ' + title)
+            log_error('MISSING PROGRAMID! ' + title)
             continue
 
         try:
             # lookup watched flag from db
-            log('    Looking up watched flag from db')
+            log_info('Looking up watched flag from db')
             cursor = get_db_cursor()
             sql = 'select watched from recorded where programid = "{}";'.format(program_id)
             cursor.execute(sql)
@@ -497,7 +628,7 @@ def main():
             playcount = re.findall('\d', str(results))[0]
 
             # lookup commercial markers
-            log('    Looking up commercial markers')
+            log_info('Looking up commercial markers')
             mark_list = []
             mark_types = ( '4', '5')
             for mark_type in mark_types:
@@ -513,20 +644,13 @@ def main():
             mark_dict = dict(zip(mark_list[0], mark_list[1]))
 
         except(AttributeError, MySQLdb.OperationalError):
-            log('^    ERROR: unable to fetch data!')
+            log_error('Unable to fetch data!')
             print AttributeError.message
             print 'Error: unable to fetch data'
 
         # parse show name for file system safe name
         title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
         title_safe = re.sub(' +', '_', title_safe)
-
-        # print program xml if --show-xml arg is given
-        if args.source_xml is not None:
-            if str(args.source_xml) in title_safe:
-                print prettify(program)
-            else:
-                continue
 
         # form the file name
         episode_name = title_safe + " - " + season + "x" + episode + " - " + base_file_name
@@ -548,17 +672,17 @@ def main():
         # update episode/special library and count
         if is_special is True:
             special_count += 1
-            #   if not special_lib or base_file_name not in special_lib:
-            #       special_lib.append(base_file_name);
+            # if not special_lib or base_file_name not in special_lib:
+            # special_lib.append(base_file_name);
         else:
             episode_count += 1
-        #    if not episode_lib or base_file_name not in episode_lib:
-        #        episode_lib.append(base_file_name)
+        # if not episode_lib or base_file_name not in episode_lib:
+        # episode_lib.append(base_file_name)
 
         # skip if link already exists
         if os.path.exists(link_file) or os.path.islink(link_file):
-            #print "Symlink " + link_file + " already exists.  Skipping."
-            log("    Symlink " + link_file + " already exists.  Skipping.")
+            # print "Symlink " + link_file + " already exists.  Skipping."
+            log_info('Symlink ' + link_file + ' already exists.  Skipping.')
             continue
 
         # find source directory, and if not found, skip it because it's an oprhaned recording!
@@ -571,8 +695,8 @@ def main():
 
         if source_dir is None:
             # could not find file!
-            #print ("Cannot create symlink for " + episode_name + ", no valid source directory.  Skipping.")
-            log("Cannot create symlink for " + episode_name + ", no valid source directory.  Skipping.")
+            # print ("Cannot create symlink for " + episode_name + ", no valid source directory.  Skipping.")
+            log_error('Cannot create symlink for ' + episode_name + ', no valid source directory.  Skipping.')
             continue
 
         # this is a new recording, so check if we're just getting a list of them for now
@@ -590,30 +714,32 @@ def main():
             result = True
             if 'ttvdb' in inetref:
                 print 'Adding new series from TTVDB: ' + title
-                log('    Adding new series from TTVDB: ' + title)
+                log_info('Adding new series from TTVDB: ' + title)
                 result = new_series_from_ttvdb(title, title_safe, get_series_id(inetref), category, target_link_dir)
             if 'tmdb' in inetref:
                 print 'Adding new series from TMDB: ' + title
-                log('    Adding new series from TMDB: ' + title)
+                log_info('Adding new series from TMDB: ' + title)
                 result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
 
-            #print "RESULT: " + str(result)
+            # print "RESULT: " + str(result)
             if result is False:
                 error_lib.append(link_file)
-                print 'ERROR processing images for link_file:'
-                print '    ' + link_file
-                log('^    ERROR processing images for link_file:\n        ' + link_file)
+                print 'ERROR processing image for link_file: ' + link_file
+                log_error('Error processing image for link_file: ' + link_file)
                 continue
 
         # create symlink
-        #print "Linking " + source_file + " ==> " + link_file
+        # print "Linking " + source_file + " ==> " + link_file
         os.symlink(source_file, link_file)
-        log("    Linking " + source_file + " ==> " + link_file)
+        log_info('Linking ' + source_file + ' ==> ' + link_file)
 
         # write the episode nfo and comskip file
         path = os.path.splitext(link_file)[0]
         write_episode_nfo(title, season, episode, plot, airdate, playcount, path)
-        write_comskip(path, mark_dict)
+
+        # commercial skipping didn't work reliably using frames markers from the mythtv database as of .27
+        # keep the code here anyway for later reference
+        # write_comskip(path, mark_dict)
 
         # count new episode or special
         if is_special is True:
@@ -621,8 +747,11 @@ def main():
         else:
             episode_new_count += 1
 
-        # if adding a new recording, stop looking
+        # if adding a new recording, comskip it, and then stop looking
         if args.add is not None:
+            if args.comskip_off is False:
+                # using comskip for commercial detection: http://www.kaashoek.com/comskip/
+                comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
             break
 
     print ''
@@ -646,11 +775,17 @@ def main():
         print '   --------------------------------'
     print ''
 
-    return
+    return not (len(error_lib) > 0)
 
 
 try:
-    main()
+    if args.print_config is True:
+        print_config()
+    elif args.comskip_all is True:
+        comskip_all()
+    else:
+        if not main():
+            write_log()
 except Exception, e:
     close_db()
     write_log(e)
