@@ -451,8 +451,6 @@ parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', 
                     help='Print new recordings not yet linked, mostly used for testing purposes.')
 parser.add_argument('--show-xml', dest='source_xml', action='store', metavar='<mpg file name match>',
                     help='Show source xml for an episode that contains any portion of the given mpg file name.')
-parser.add_argument('-l', '--log', dest='log', action='store_true', default=False,
-                    help='Write a log file (otherwise a log file is created only when an error occurs).')
 parser.add_argument('--comskip-all', dest='comskip_all', action='store_true', default=False,
                     help='Run comskip on all video files found recursively in the "symlinks_dir" path from config.py.')
 parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', default=False,
@@ -568,9 +566,9 @@ def comskip_all():
             comskip_file(root, file)
 
 
-def main():
+def read_recordings():
     """
-    main routine
+    read MythTV recordings
 
     """
     series_lib = []
@@ -579,7 +577,7 @@ def main():
     episode_new_count = 0
     special_count = 0
     special_new_count = 0
-    error_lib = []
+    image_error_lib = []
 
     for program in recorded_list.iter('Program'):
         is_special = False
@@ -740,7 +738,7 @@ def main():
 
             # print "RESULT: " + str(result)
             if result is False:
-                error_lib.append(link_file)
+                image_error_lib.append(link_file)
                 print 'ERROR processing image for link_file: ' + link_file
                 log_error('Error processing image for link_file: ' + link_file)
                 continue
@@ -781,34 +779,35 @@ def main():
     print '   |   New   |  Episodes: ' + str(episode_new_count)
     print '   |         |  Specials: ' + str(special_new_count)
     print '   --------------------------------'
-    print '   |  Errors: ' + str(len(error_lib))
-    if len(error_lib) > 0:
+    print '   |  Errors: ' + str(len(image_error_lib))
+    if len(image_error_lib) > 0:
         print ''
         print 'Error processing images for these link_files:'
         print ''
-        for lf in error_lib:
+        for lf in image_error_lib:
             print lf
     else:
         print '   --------------------------------'
     print ''
 
-    return not (len(error_lib) > 0)
+    return not (len(image_error_lib) > 0 or 'ERROR' in log_content)
 
 
 try:
+    success = True
     if args.print_config is True:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
-    elif args.scan_all is True:
-        if not main():
-            write_log()
+    elif args.scan_all is True or args.add is not None:
+        success = read_recordings()
+    if success is not True:
+        sys.exit(1)
 except Exception, e:
     close_db()
     write_log(e)
     sys.exit(1)
 else:
     close_db()
-    if args.log is True:
-        write_log()
+    write_log()
     sys.exit(0)
