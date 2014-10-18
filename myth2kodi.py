@@ -275,6 +275,9 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         tree = ET.parse('/tmp/en.xml')
         series_data = tree.getroot()
         series = series_data.find('Series')
+        if series is None:
+            log_error('Could not find the "Series" section in en.xml.')
+            return False
 
         rating = series.find('Rating').text
         votes = series.find('RatingCount').text
@@ -299,6 +302,13 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         # copy poster, banner, and fanart to link dir
         log_info('Retrieving poster, fanart, and banner...')
         ttvdb_banners_url = ttvdb_base_url + 'banners/'
+        poster_text = series.find('poster').text
+        banner_text = series.find('banner').text
+        fanart_text = series.find('fanart').text
+        if poster_text is None or banner_text is None or fanart_text is None:
+            log_error('Could not retrieve poster, banner, or fanart url.')
+            return False
+
         poster_url = ttvdb_banners_url + series.find('poster').text
         banner_url = ttvdb_banners_url + series.find('banner').text
         fanart_url = ttvdb_banners_url + series.find('fanart').text
@@ -315,9 +325,6 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         if not download_file(fanart_url, os.path.join(directory, 'fanart.jpg')):
             return False
 
-        # urllib.urlretrieve(ttvdb_banners_url + poster, os.path.join(directory, 'poster.jpg'))
-        # urllib.urlretrieve(ttvdb_banners_url + banner, os.path.join(directory, 'banner.jpg'))
-        # urllib.urlretrieve(ttvdb_banners_url + fanart, os.path.join(directory, 'fanart.jpg'))
         return True
 
 
