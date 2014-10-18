@@ -1,4 +1,6 @@
 #! /usr/bin/env python
+# -- coding: utf-8 --
+
 import httplib
 
 import os
@@ -16,7 +18,6 @@ import sys
 import MySQLdb
 import time
 import subprocess
-
 import config
 
 
@@ -443,18 +444,22 @@ parser = argparse.ArgumentParser(__file__,
                                              ' - Create a MythTV user job with -add <path to MythTV mpg> to add a new MythTV recording.\n' +
                                              '   The new recording will be scanned for commercials after it is added.\n',
                                  formatter_class=argparse.RawTextHelpFormatter)
-parser.add_argument('-a', '--add', dest='add', action='store', metavar='<path to mpg file>',
-                    help="Full path to file name of new recording, used for a MythTV user job upon 'Recording Finished'.")
-parser.add_argument('-s', '--scan-all', dest='scan_all', action='store_true', default=False,
-                    help='Scan all MythTV recordings and add any that are missing.')
-parser.add_argument('-p', '--print-new', dest='print_new', action='store_true', default=False,
+parser.add_argument('--add', dest='add', action='store', metavar='<path to mpg file>',
+                    help="Full path to file name of MythTV recording, used for a MythTV user job upon 'Recording Finished'.")
+parser.add_argument('--add-all', dest='add_all', action='store_true', default=False,
+                    help='Add all MythTV recordings that are missing.')
+parser.add_argument('--show-all', dest='show_all', action='store_true', default=False,
+                    help='Show all MythTV recordings that are missing. This will not write any new symlinks or files.')
+parser.add_argument('--print-new', dest='print_new', action='store_true', default=False,
                     help='Print new recordings not yet linked, mostly used for testing purposes.')
 parser.add_argument('--show-xml', dest='source_xml', action='store', metavar='<mpg file name match>',
                     help='Show source xml for an episode that contains any portion of the given mpg file name.')
+parser.add_argument('--comskip', dest='comskip', action='store', metavar='<path to mpg file>',
+                    help="Full path to file name of MythTV recording, used to comskip just a single recording.")
 parser.add_argument('--comskip-all', dest='comskip_all', action='store_true', default=False,
                     help='Run comskip on all video files found recursively in the "symlinks_dir" path from config.py.')
 parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', default=False,
-                    help='Turn off comskip. Does nothing when --comskip-all is given.')
+                    help='Turn off comskip when adding a single recording with --add.')
 parser.add_argument('--match-title', dest='match_title', action='store', metavar='<title match>',
                     help='Process only series matching any portion of the given title')
 parser.add_argument('--print-config', dest='print_config', action='store_true',
@@ -585,8 +590,9 @@ def read_recordings():
         # print the program for testing
         # print Prettify(program)
 
-        # see if we're adding a new file by comparing the current file name to the argument file name
-        base_file_name = get_base_filename_from(program.find('FileName').text)
+        # check if we're adding a new file by comparing the current file name to the argument file name
+        file_name = program.find('FileName').text
+        base_file_name = get_base_filename_from(file_name)
         if args.add is not None:
             if not base_file_name == get_base_filename_from(args.add):
                 continue
@@ -596,7 +602,6 @@ def read_recordings():
         title = program.find('Title').text
         season = program.find('Season').text
         episode = program.find('Episode').text.zfill(2)
-        file_extension = program.find('FileName').text[-4:]
         airdate = program.find('Airdate').text
         plot = program.find('Description').text
         inetref = program.find('Inetref').text
@@ -619,6 +624,7 @@ def read_recordings():
             else:
                 continue
 
+        file_extension = file_name[-4:]
         log_info('PROCESSING PROGRAM:\n^title: {}\n^filename: {}\n^program id: {}'.format(title,
                                                                                           base_file_name + file_extension,
                                                                                           program_id))
@@ -680,6 +686,13 @@ def read_recordings():
         link_file = os.path.join(target_link_dir, episode_name) + file_extension
         # print 'LINK FILE = ' + link_file
 
+        # check if we're running comskip on just one recording
+        if args.comskip is not None:
+            if base_file_name == get_base_filename_from(args.comskip):
+                comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
+                log_info('Running comskip on ' + args.comskip)
+                break
+
         # update series library and count
         if not series_lib or title_safe not in series_lib:
             series_lib.append(title_safe)
@@ -700,7 +713,7 @@ def read_recordings():
             log_info('Symlink ' + link_file + ' already exists.  Skipping.')
             continue
 
-        # find source directory, and if not found, skip it because it's an oprhaned recording!
+        # find source directory, and if not found, skip it because it's an orphaned recording!
         source_dir = None
         for mythtv_recording_dir in config.mythtv_recording_dirs[:]:
             source_file = os.path.join(mythtv_recording_dir, base_file_name) + file_extension
@@ -722,7 +735,8 @@ def read_recordings():
 
         # process new show if found
         if not os.path.exists(target_link_dir):  # and 'Johnny' in title_safe:
-            os.makedirs(target_link_dir)
+            if args.show_all is False:
+                os.makedirs(target_link_dir)
             series_new_count += 1
 
             # branch on inetref type
@@ -730,11 +744,13 @@ def read_recordings():
             if 'ttvdb' in inetref:
                 print 'Adding new series from TTVDB: ' + title
                 log_info('Adding new series from TTVDB: ' + title)
-                result = new_series_from_ttvdb(title, title_safe, get_series_id(inetref), category, target_link_dir)
+                if args.show_all is False:
+                    result = new_series_from_ttvdb(title, title_safe, get_series_id(inetref), category, target_link_dir)
             if 'tmdb' in inetref:
                 print 'Adding new series from TMDB: ' + title
                 log_info('Adding new series from TMDB: ' + title)
-                result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
+                if args.show_all is False:
+                    result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
 
             # print "RESULT: " + str(result)
             if result is False:
@@ -745,12 +761,14 @@ def read_recordings():
 
         # create symlink
         # print "Linking " + source_file + " ==> " + link_file
-        os.symlink(source_file, link_file)
+        if args.show_all is False:
+            os.symlink(source_file, link_file)
         log_info('Linking ' + source_file + ' ==> ' + link_file)
 
         # write the episode nfo and comskip file
         path = os.path.splitext(link_file)[0]
-        write_episode_nfo(title, season, episode, plot, airdate, playcount, path)
+        if args.show_all is False:
+            write_episode_nfo(title, season, episode, plot, airdate, playcount, path)
 
         # commercial skipping didn't work reliably using frames markers from the mythtv database as of .27
         # keep the code here anyway for later reference
@@ -762,7 +780,7 @@ def read_recordings():
         else:
             episode_new_count += 1
 
-        # if adding a new recording, comskip it, and then stop looking
+        # if adding a new recording with --add, comskip it, and then stop looking
         if args.add is not None:
             if args.comskip_off is False:
                 # using comskip for commercial detection: http://www.kaashoek.com/comskip/
@@ -799,7 +817,7 @@ try:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
-    elif args.scan_all is True or args.add is not None:
+    elif args.add_all is True or args.show_all is True or args.add is not None:
         success = read_recordings()
     if success is not True:
         sys.exit(1)
