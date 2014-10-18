@@ -655,21 +655,21 @@ def read_recordings():
             results = cursor.fetchone()
             playcount = re.findall('\d', str(results))[0]
 
-            # lookup commercial markers
-            log_info('Looking up commercial markers')
-            mark_list = []
-            mark_types = ( '4', '5')
-            for mark_type in mark_types:
-                sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
-                    start_time, chan_id, mark_type)
-                cursor.execute(sql)
-                results = cursor.fetchall()
-                l = []
-                for result in results:
-                    l.append(result[0])
-                mark_list.append(l)
-
-            mark_dict = dict(zip(mark_list[0], mark_list[1]))
+            # # lookup commercial markers (not used, replaced with comskip)
+            # log_info('Looking up commercial markers')
+            # mark_list = []
+            # mark_types = ( '4', '5')
+            # for mark_type in mark_types:
+            #     sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
+            #         start_time, chan_id, mark_type)
+            #     cursor.execute(sql)
+            #     results = cursor.fetchall()
+            #     l = []
+            #     for result in results:
+            #         l.append(result[0])
+            #     mark_list.append(l)
+            #
+            # mark_dict = dict(zip(mark_list[0], mark_list[1]))
 
         except(AttributeError, MySQLdb.OperationalError):
             log_error('Unable to fetch data!')
