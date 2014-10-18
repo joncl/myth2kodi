@@ -108,7 +108,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     # add genres
     if genre_list is not None and '|' in genre_list:
         genre_list = genre_list.strip('|').split('|')
-        # print 'genre_list: ' + str(genre_list)
+        # print 'genre_list: ' + unicode(genre_list)
         for genre in genre_list:
             # print 'genre: ' + genre
             title_element = ET2.SubElement(root, 'genre')
@@ -166,7 +166,7 @@ def write_comskip(base_link_file, mark_dict):
     c = 'FILE PROCESSING COMPLETE\r\n'
     c = c + '------------------------\r\n'
     for start, end in mark_dict.iteritems():
-        c = c + '{} {}\r\n'.format(str(start), str(end))
+        c = c + '{} {}\r\n'.format(unicode(start), unicode(end))
 
     f = open(base_link_file + '.txt', 'a')
     f.write(c)
@@ -219,10 +219,10 @@ def download_file(file_url, target_file='', return_response=False):
         output.write(response.read())
         output.close()
     except urllib2.HTTPError, e:
-        log_error('HTTPError = ' + str(e.code))
+        log_error('HTTPError = ' + unicode(e.code))
         return False
     except urllib2.URLError, e:
-        log_error('URLError = ' + str(e.reason))
+        log_error('URLError = ' + unicode(e.reason))
         return False
     except httplib.HTTPException, e:
         log_error('HTTPException')
@@ -395,22 +395,24 @@ def new_series_from_tmdb(title, inetref, category, directory):
     if response is None:
         return False
     img = Image.open(cStringIO.StringIO(response.read()))
-    # print 'w: ' + str(img.size[0]) + ' h: ' + str(img.size[1])
+    # print 'w: ' + unicode(img.size[0]) + ' h: ' + unicode(img.size[1])
     banner_ratio = 758 / float(140)
     # shift crop down by 200 pixels
     box = (0, 220, img.size[0], int(round((img.size[0] / banner_ratio))) + 220)
     img = img.crop(box).resize((758, 140), Image.ANTIALIAS)
-    img.save(os.path.join(directory, 'banner.jpg'))
+    banner_file = os.path.join(directory, 'banner.jpg')
+    log_info('Banner image saved to ' + banner_file)
+    img.save(banner_file)
 
     # print mr
     # print mr['title']
     # print mr['runtime']
 
-    rating = str(mr['vote_average'])
-    votes = str(mr['vote_count'])
-    plot = str(mr['overview'])
-    id = str(mr['id'])
-    premiered = str(mr['release_date'])
+    rating = unicode(mr['vote_average'])
+    votes = unicode(mr['vote_count'])
+    plot = unicode(mr['overview'])
+    id = unicode(mr['id'])
+    premiered = unicode(mr['release_date'])
     studio = ''
     date_added = ''
 
@@ -426,7 +428,7 @@ def new_series_from_tmdb(title, inetref, category, directory):
                     genre_list += name + '|'
         if category is not None:
             genre_list += category
-        genre_list = str(genre_list).strip('|')
+        genre_list = unicode(genre_list).strip('|')
 
     # print 'rating: ' + rating
     # print 'votes: ' + votes
@@ -492,16 +494,16 @@ args = parser.parse_args()
 def print_config():
     print ''
     print 'config.py:'
-    print '    hostname:            ' + str(config.hostname)
-    print '    host_port:           ' + str(config.host_port)
-    print '    myth_recording_dirs: ' + str(config.mythtv_recording_dirs)
-    print '    symlinks_dir:        ' + str(config.symlinks_dir)
-    print '    ttvdb_key:           ' + str(config.ttvdb_key)
-    print '    ttvdb_zips_dir:      ' + str(config.ttvdb_zips_dir)
-    print '    tmdb_key:            ' + str(config.tmdb_key)
-    print '    db_user:             ' + str(config.db_user)
-    print '    db_passwd:           ' + str(config.db_passwd)
-    print '    db_name:             ' + str(config.db_name)
+    print '    hostname:            ' + unicode(config.hostname)
+    print '    host_port:           ' + unicode(config.host_port)
+    print '    myth_recording_dirs: ' + unicode(config.mythtv_recording_dirs)
+    print '    symlinks_dir:        ' + unicode(config.symlinks_dir)
+    print '    ttvdb_key:           ' + unicode(config.ttvdb_key)
+    print '    ttvdb_zips_dir:      ' + unicode(config.ttvdb_zips_dir)
+    print '    tmdb_key:            ' + unicode(config.tmdb_key)
+    print '    db_user:             ' + unicode(config.db_user)
+    print '    db_passwd:           ' + unicode(config.db_passwd)
+    print '    db_name:             ' + unicode(config.db_name)
     print ''
 
 
@@ -537,7 +539,7 @@ def write_log(msg=None):
     if msg is None:
         f.write(log_content)
     else:
-        f.write(log_content + '\n\n' + str(msg))
+        f.write(log_content + '\n\n' + unicode(msg))
     f.close()
 
 
@@ -625,7 +627,7 @@ def read_recordings():
 
         # print program xml if --show-xml arg is given
         if args.source_xml is not None:
-            if str(args.source_xml) in base_file_name:
+            if unicode(args.source_xml) in base_file_name:
                 print prettify(program)
                 sys.exit(0)
             else:
@@ -653,7 +655,7 @@ def read_recordings():
             sql = 'select watched from recorded where programid = "{}";'.format(program_id)
             cursor.execute(sql)
             results = cursor.fetchone()
-            playcount = re.findall('\d', str(results))[0]
+            playcount = re.findall('\d', unicode(results))[0]
 
             # # lookup commercial markers (not used, replaced with comskip)
             # log_info('Looking up commercial markers')
@@ -759,7 +761,7 @@ def read_recordings():
                 if args.show_all is False:
                     result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
 
-            # print "RESULT: " + str(result)
+            # print "RESULT: " + unicode(result)
             if result is False:
                 image_error_lib.append(link_file)
                 print 'ERROR processing image for link_file: ' + link_file
@@ -796,15 +798,15 @@ def read_recordings():
 
     print ''
     print '   --------------------------------'
-    print '   |         |  Series:   ' + str(len(series_lib))
-    print '   |  Total  |  Episodes: ' + str(episode_count)
-    print '   |         |  Specials: ' + str(special_count)
+    print '   |         |  Series:   ' + unicode(len(series_lib))
+    print '   |  Total  |  Episodes: ' + unicode(episode_count)
+    print '   |         |  Specials: ' + unicode(special_count)
     print '   |-------------------------------'
-    print '   |         |  Series:   ' + str(series_new_count)
-    print '   |   New   |  Episodes: ' + str(episode_new_count)
-    print '   |         |  Specials: ' + str(special_new_count)
+    print '   |         |  Series:   ' + unicode(series_new_count)
+    print '   |   New   |  Episodes: ' + unicode(episode_new_count)
+    print '   |         |  Specials: ' + unicode(special_new_count)
     print '   --------------------------------'
-    print '   |  Errors: ' + str(len(image_error_lib))
+    print '   |  Errors: ' + unicode(len(image_error_lib))
     if len(image_error_lib) > 0:
         print ''
         print 'Error processing images for these link_files:'
@@ -824,7 +826,7 @@ try:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
-    elif args.add_all is True or args.show_all is True or args.add is not None:
+    elif args.add_all is True or args.show_all is True or args.match_title is not None or args.add is not None:
         success = read_recordings()
     if success is not True:
         sys.exit(1)
