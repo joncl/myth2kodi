@@ -461,16 +461,19 @@ parser.add_argument('--show-all', dest='show_all', action='store_true', default=
                     help='Show all MythTV recordings that are missing. This will not write any new symlinks or files.')
 parser.add_argument('--print-new', dest='print_new', action='store_true', default=False,
                     help='Print new recordings not yet linked, mostly used for testing purposes.')
-parser.add_argument('--show-xml', dest='source_xml', action='store', metavar='<mpg file name match>',
-                    help='Show source xml for an episode that contains any portion of the given mpg file name.')
 parser.add_argument('--comskip', dest='comskip', action='store', metavar='<path to mpg file>',
                     help="Full path to file name of MythTV recording, used to comskip just a single recording.")
 parser.add_argument('--comskip-all', dest='comskip_all', action='store_true', default=False,
                     help='Run comskip on all video files found recursively in the "symlinks_dir" path from config.py.')
 parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', default=False,
                     help='Turn off comskip when adding a single recording with --add.')
-parser.add_argument('--match-title', dest='match_title', action='store', metavar='<title match>',
-                    help='Process only series matching any portion of the given title')
+parser.add_argument('--add-match-title', dest='add_match_title', action='store', metavar='<title match>',
+                    help='Process only recordings with titles that contain the given query.')
+parser.add_argument('--print-match-filename', dest='print_match_filename', action='store',
+                    metavar='<mpg file name match>',
+                    help='Show recording xml for a recording with the same mpg file name as the given file name.')
+parser.add_argument('--print-match-title', dest='print_match_title', action='store', metavar='<title match>',
+                    help='Print recording xml for recordings with titles that contain the given query.')
 parser.add_argument('--print-config', dest='print_config', action='store_true',
                     help='Prints all the config variables and values in the config.py file.')
 
@@ -488,7 +491,7 @@ if len(sys.argv) == 1:
     sys.exit(1)
 
 args = parser.parse_args()
-# print args.source_xml
+# print args.print_match_filename
 
 
 def print_config():
@@ -518,18 +521,6 @@ def get_recorded_list():
     # print prettify(tree.getroot())
     # sys.exit(0)
     return tree.getroot()
-
-
-def check_args():
-    if args.print_new is True:
-        print 'MYTHTV RECORDINGS NOT LINKED:'
-
-    if args.add is not None:
-        print 'ADDING NEW RECORDING: ' + args.add
-
-
-recorded_list = get_recorded_list()
-check_args()
 
 
 def write_log(msg=None):
@@ -593,44 +584,52 @@ def read_recordings():
     special_new_count = 0
     image_error_lib = []
 
-    for program in recorded_list.iter('Program'):
+    if args.print_new is True:
+        print 'MYTHTV RECORDINGS NOT LINKED:'
+
+    recorded_list = get_recorded_list()
+
+    for recording in recorded_list.iter('Program'):
         is_special = False
 
-        # print the program for testing
-        # print Prettify(program)
-
         # check if we're adding a new file by comparing the current file name to the argument file name
-        file_name = program.find('FileName').text
-        base_file_name = get_base_filename_from(file_name)
+        file_name = unicode(recording.find('FileName').text)
+        base_file_name = unicode(get_base_filename_from(file_name))
         if args.add is not None:
-            if not base_file_name == get_base_filename_from(args.add):
+            if not base_file_name == unicode(get_base_filename_from(args.add)):
                 continue
             log_info('Adding new file by "--add" argument: {}'.format(args.add))
+            print 'ADDING NEW RECORDING: ' + args.add
 
-        # collect program attributes
-        title = program.find('Title').text
-        season = program.find('Season').text
-        episode = program.find('Episode').text.zfill(2)
-        airdate = program.find('Airdate').text
-        plot = program.find('Description').text
-        inetref = program.find('Inetref').text
-        category = program.find('Category').text
-        record_date = re.findall('\d*-\d*-\d*', program.find('StartTime').text)[0]
-        program_id = program.find('ProgramId').text
-        chan_id = program.find('Channel/ChanId').text
-        start_time = program.find('StartTime').text.replace('T', ' ').replace('Z', '')
-
-        # check if we are matching on a title
-        if args.match_title is not None:
-            if args.match_title not in title:
-                continue
-
-        # print program xml if --show-xml arg is given
-        if args.source_xml is not None:
-            if unicode(args.source_xml) in base_file_name:
-                print prettify(program)
+        # print recording info if --print_match_filename arg is given
+        if args.print_match_filename is not None:
+            if unicode(args.print_match_filename) in base_file_name:
+                print prettify(recording)
                 sys.exit(0)
             else:
+                continue
+
+        # print recording info for testing
+        title = unicode(recording.find('Title').text)
+        if args.print_match_title is not None and args.print_match_title in title:
+            print prettify(recording)
+            continue
+
+        # collect program attributes
+        season = unicode(recording.find('Season').text)
+        episode = unicode(recording.find('Episode').text.zfill(2))
+        airdate = unicode(recording.find('Airdate').text)
+        plot = unicode(recording.find('Description').text)
+        inetref = unicode(recording.find('Inetref').text)
+        category = unicode(recording.find('Category').text)
+        record_date = unicode(re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0])
+        program_id = unicode(recording.find('ProgramId').text)
+        # chan_id = program.find('Channel/ChanId').text
+        # start_time = program.find('StartTime').text.replace('T', ' ').replace('Z', '')
+
+        # check if we are matching on a title
+        if args.add_match_title is not None:
+            if args.add_match_title not in title:
                 continue
 
         file_extension = file_name[-4:]
@@ -655,7 +654,7 @@ def read_recordings():
             sql = 'select watched from recorded where programid = "{}";'.format(program_id)
             cursor.execute(sql)
             results = cursor.fetchone()
-            playcount = re.findall('\d', unicode(results))[0]
+            playcount = unicode(re.findall('\d', unicode(results))[0])
 
             # # lookup commercial markers (not used, replaced with comskip)
             # log_info('Looking up commercial markers')
@@ -727,7 +726,7 @@ def read_recordings():
         for mythtv_recording_dir in config.mythtv_recording_dirs[:]:
             source_file = os.path.join(mythtv_recording_dir, base_file_name) + file_extension
             if os.path.isfile(source_file):
-                source_dir = mythtv_recording_dir
+                source_dir = unicode(mythtv_recording_dir)
                 break
 
         if source_dir is None:
@@ -740,7 +739,6 @@ def read_recordings():
         if args.print_new is True:
             print '   ' + source_file
             continue
-
 
         # process new show if found
         if not os.path.exists(target_link_dir):  # and 'Johnny' in title_safe:
@@ -826,8 +824,8 @@ try:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
-    elif args.add_all is True or args.show_all is True or args.match_title is not None or args.add is not None:
-        success = read_recordings()
+    # elif args.add_all is True or args.show_all is True or args.add_match_title is not None or args.add is not None:
+    success = read_recordings()
     if success is not True:
         sys.exit(1)
 except Exception, e:
