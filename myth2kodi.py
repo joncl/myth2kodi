@@ -41,12 +41,14 @@ def log_info(content):
 def log_error(content):
     log(content, 'ERROR')
 
+def log_warning(content):
+    log(content, 'WARNING')
+
 
 def log(content, type):
     global log_content
-    log_content = '{}{} {}: {}\n'.format(log_content, timestamp(), type.rjust(5),
+    log_content = '{}{} {}: {}\n'.format(log_content, timestamp(), type.rjust(8),
                                          content.replace('^', ' ' * 31))
-
 
 def get_db_cursor():
     global db
@@ -639,43 +641,44 @@ def read_recordings():
 
         # be sure we have an inetref
         if inetref is None or inetref == '':
-            log_error('MISSING INETREF!: ' + title)
+            log_warning('Inetref was not found, cannot process: ' + title)
             continue
 
-        # be sure we have a program_id
-        if program_id is None or program_id == '':
-            log_error('MISSING PROGRAMID! ' + title)
+        # lookup watched flag from db
+        if program_id is not None and not program_id == '':
+            try:
+                log_info('Looking up watched flag from db')
+                cursor = get_db_cursor()
+                sql = 'select watched from recorded where programid = "{}";'.format(program_id)
+                cursor.execute(sql)
+                results = cursor.fetchone()
+                playcount = unicode(re.findall('\d', unicode(results))[0])
+
+                # # lookup commercial markers (not used, replaced with comskip)
+                # log_info('Looking up commercial markers')
+                # mark_list = []
+                # mark_types = ( '4', '5')
+                # for mark_type in mark_types:
+                #     sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
+                #         start_time, chan_id, mark_type)
+                #     cursor.execute(sql)
+                #     results = cursor.fetchall()
+                #     l = []
+                #     for result in results:
+                #         l.append(result[0])
+                #     mark_list.append(l)
+                #
+                # mark_dict = dict(zip(mark_list[0], mark_list[1]))
+
+            except(AttributeError, MySQLdb.OperationalError):
+                log_error('Unable to fetch data!')
+                print AttributeError.message
+                print 'Error: unable to fetch data'
+
+        else:
+            playcount = None
+            log_warning('ProgramId was not found, playcount could not be determined for: ' + title)
             continue
-
-        try:
-            # lookup watched flag from db
-            log_info('Looking up watched flag from db')
-            cursor = get_db_cursor()
-            sql = 'select watched from recorded where programid = "{}";'.format(program_id)
-            cursor.execute(sql)
-            results = cursor.fetchone()
-            playcount = unicode(re.findall('\d', unicode(results))[0])
-
-            # # lookup commercial markers (not used, replaced with comskip)
-            # log_info('Looking up commercial markers')
-            # mark_list = []
-            # mark_types = ( '4', '5')
-            # for mark_type in mark_types:
-            #     sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
-            #         start_time, chan_id, mark_type)
-            #     cursor.execute(sql)
-            #     results = cursor.fetchall()
-            #     l = []
-            #     for result in results:
-            #         l.append(result[0])
-            #     mark_list.append(l)
-            #
-            # mark_dict = dict(zip(mark_list[0], mark_list[1]))
-
-        except(AttributeError, MySQLdb.OperationalError):
-            log_error('Unable to fetch data!')
-            print AttributeError.message
-            print 'Error: unable to fetch data'
 
         # parse show name for file system safe name
         title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
