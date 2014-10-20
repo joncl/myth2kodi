@@ -471,6 +471,8 @@ parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', de
                     help='Turn off comskip when adding a single recording with --add.')
 parser.add_argument('--add-match-title', dest='add_match_title', action='store', metavar='<title match>',
                     help='Process only recordings with titles that contain the given query.')
+parser.add_argument('--export-recording-list', dest='export_recording_list', action='store_true', default=False,
+                    help='Export the entire MythTV recording list to recording_list.xml.')
 parser.add_argument('--print-match-filename', dest='print_match_filename', action='store',
                     metavar='<mpg file name match>',
                     help='Show recording xml for a recording with the same mpg file name as the given file name.')
@@ -512,7 +514,7 @@ def print_config():
     print ''
 
 
-def get_recorded_list():
+def get_recording_list():
     """
     get recorded list from mythtv database
 
@@ -573,6 +575,14 @@ def comskip_all():
             comskip_file(root, file)
 
 
+def write_recording_list(recording_list):
+    log_info('Writing recording list.')
+    f = open('recording_list.xml', 'w')
+    f.write(prettify(recording_list))
+    f.close()
+    log_info('Done writing recording list.')
+
+
 def read_recordings():
     """
     read MythTV recordings
@@ -589,9 +599,13 @@ def read_recordings():
     if args.print_new is True:
         print 'MYTHTV RECORDINGS NOT LINKED:'
 
-    recorded_list = get_recorded_list()
+    recording_list = get_recording_list()
 
-    for recording in recorded_list.iter('Program'):
+    if args.export_recording_list is True:
+        write_recording_list(recording_list)
+        return True
+
+    for recording in recording_list.iter('Program'):
         is_special = False
 
         # check if we're adding a new file by comparing the current file name to the argument file name
