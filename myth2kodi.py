@@ -1,5 +1,4 @@
 #! /usr/bin/env python
-# -- coding: utf-8 --
 
 import httplib
 
@@ -20,6 +19,8 @@ import time
 import subprocess
 import config
 
+reload(sys)
+sys.setdefaultencoding('utf-8')
 
 BASE_URL = "http://" + config.hostname + ":" + config.host_port
 THIS_DIR = os.getcwd()
@@ -41,6 +42,7 @@ def log_info(content):
 def log_error(content):
     log(content, 'ERROR')
 
+
 def log_warning(content):
     log(content, 'WARNING')
 
@@ -50,10 +52,16 @@ def log(content, type):
     log_content = '{}{} {}: {}\n'.format(log_content, timestamp(), type.rjust(8),
                                          content.replace('^', ' ' * 31))
 
+
 def get_db_cursor():
     global db
     if db is None:
-        db = MySQLdb.connect('localhost', config.db_user, config.db_passwd, config.db_name)
+        db = MySQLdb.connect(host='localhost',
+                             user=config.db_user,
+                             passwd=config.db_passwd,
+                             db=config.db_name,
+                             charset='utf8',
+                             use_unicode=True)
     return db.cursor()
 
 
@@ -110,7 +118,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     # add genres
     if genre_list is not None and '|' in genre_list:
         genre_list = genre_list.strip('|').split('|')
-        # print 'genre_list: ' + unicode(genre_list)
+        # print 'genre_list: ' + genre_list
         for genre in genre_list:
             # print 'genre: ' + genre
             title_element = ET2.SubElement(root, 'genre')
@@ -127,6 +135,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     title_element.text = date_added
     tree = ET2.ElementTree(root)
     tree.write(os.path.join(directory, 'tvshow.nfo'), pretty_print=True, encoding='UTF-8', xml_declaration=True)
+    log_info('Done writing series nfo file.')
     return
 
 
@@ -168,7 +177,7 @@ def write_comskip(base_link_file, mark_dict):
     c = 'FILE PROCESSING COMPLETE\r\n'
     c = c + '------------------------\r\n'
     for start, end in mark_dict.iteritems():
-        c = c + '{} {}\r\n'.format(unicode(start), unicode(end))
+        c = c + '{} {}\r\n'.format(start, end)
 
     f = open(base_link_file + '.txt', 'a')
     f.write(c)
@@ -212,6 +221,9 @@ def get_series_id(inetref):
 
 
 def download_file(file_url, target_file='', return_response=False):
+    if return_response is False:
+        log_info('Saving: ' + file_url)
+        log_info('    to: ' + target_file)
     try:
         req = urllib2.Request(file_url)
         response = urllib2.urlopen(req)
@@ -221,10 +233,10 @@ def download_file(file_url, target_file='', return_response=False):
         output.write(response.read())
         output.close()
     except urllib2.HTTPError, e:
-        log_error('HTTPError = ' + unicode(e.code))
+        log_error('HTTPError = ' + str(e.code))
         return False
     except urllib2.URLError, e:
-        log_error('URLError = ' + unicode(e.reason))
+        log_error('URLError = ' + e.reason)
         return False
     except httplib.HTTPException, e:
         log_error('HTTPException')
@@ -307,23 +319,28 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
         poster_text = series.find('poster').text
         banner_text = series.find('banner').text
         fanart_text = series.find('fanart').text
+        if poster_text is None:
+            log_warning('Poster image info could not be retrieved')
+        if banner_text is None:
+            log_warning('Banner image info could not be retrieved')
+        if fanart_text is None:
+            log_warning('Fanart image info could not be retrieved')
         if poster_text is None or banner_text is None or fanart_text is None:
-            log_error('Could not retrieve poster, banner, or fanart url.')
             return False
 
         poster_url = ttvdb_banners_url + series.find('poster').text
         banner_url = ttvdb_banners_url + series.find('banner').text
         fanart_url = ttvdb_banners_url + series.find('fanart').text
 
-        log_info('downloading poster from: ' + poster_url)
+        log_info('Downloading poster...')
         if not download_file(poster_url, os.path.join(directory, 'poster.jpg')):
             return False
 
-        log_info('downloading banner from: ' + banner_url)
+        log_info('Downloading banner...')
         if not download_file(banner_url, os.path.join(directory, 'banner.jpg')):
             return False
 
-        log_info('downloading fanart from: ' + fanart_url)
+        log_info('Downloading fanart...')
         if not download_file(fanart_url, os.path.join(directory, 'fanart.jpg')):
             return False
 
@@ -360,8 +377,8 @@ def new_series_from_tmdb(title, inetref, category, directory):
         return float("inf") if x == 'original' else int(x[1:])
 
     # max_size
-    max_poster_size = max(poster_sizes, key=size_str_to_int)
-    max_backdrop_size = max(backdrop_sizes, key=size_str_to_int)
+    max_poster_size = str(max(poster_sizes, key=size_str_to_int))
+    max_backdrop_size = str(max(backdrop_sizes, key=size_str_to_int))
 
     series_id = get_series_id(inetref)
     request = urllib2.Request('{url}/movie/{id}?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
@@ -371,10 +388,23 @@ def new_series_from_tmdb(title, inetref, category, directory):
     log_info('Getting path to poster...')
     poster_path = mr['poster_path']
     poster_url = '{0}{1}{2}'.format(base_url, max_poster_size, poster_path)
+    if poster_path is None:
+        return False
+    poster_target = os.path.join(directory, 'poster.jpg')
+    log_info('Downloading poster...')
+    if download_file(poster_url, poster_target) is False:
+        return False
+
     # #### FANART #####
     log_info('Getting path to fanart...')
     backdrop_path = mr['backdrop_path']
     backdrop_url = '{0}{1}{2}'.format(base_url, max_backdrop_size, backdrop_path)
+    if backdrop_path is None:
+        return False
+    backdrop_target = os.path.join(directory, 'fanart.jpg')
+    log_info('Downloading fanart...')
+    if download_file(backdrop_url, backdrop_target) is False:
+        return False
 
     # print '    poster_path: ' + poster_path
     # print '    backdrop_path: ' + backdrop_path
@@ -382,28 +412,20 @@ def new_series_from_tmdb(title, inetref, category, directory):
     # request = Request('{url}/movie/{id}/images?api_key={key}'.format(url=api_url, id=series_id, key=config.tmdb_key))
     # ir = json.loads(urlopen(request).read())
 
-    # save images
-    # urllib.urlretrieve(poster_url, os.path.join(directory, 'poster.jpg'))
-    # urllib.urlretrieve(backdrop_url, os.path.join(directory, 'fanart.jpg'))
-    if download_file(poster_url, os.path.join(directory, 'poster.jpg')) is False:
-        return False
-    if download_file(backdrop_url, os.path.join(directory, 'fanart.jpg')) is False:
-        return False
-
     # #### BANNER #####
     # make a 758 x 140 banner from poster
     log_info('Making 758 x 140 banner image from poster...')
     response = download_file(poster_url, '', True)
-    if response is None:
+    if response is None or response is False:
         return False
     img = Image.open(cStringIO.StringIO(response.read()))
-    # print 'w: ' + unicode(img.size[0]) + ' h: ' + unicode(img.size[1])
+    # print 'w: ' + img.size[0] + ' h: ' + img.size[1]
     banner_ratio = 758 / float(140)
     # shift crop down by 200 pixels
     box = (0, 220, img.size[0], int(round((img.size[0] / banner_ratio))) + 220)
     img = img.crop(box).resize((758, 140), Image.ANTIALIAS)
     banner_file = os.path.join(directory, 'banner.jpg')
-    log_info('Banner image saved to ' + banner_file)
+    log_info('Saving banner image file to ' + banner_file)
     img.save(banner_file)
 
     # print mr
@@ -430,7 +452,7 @@ def new_series_from_tmdb(title, inetref, category, directory):
                     genre_list += name + '|'
         if category is not None:
             genre_list += category
-        genre_list = unicode(genre_list).strip('|')
+        genre_list = genre_list.strip('|')
 
     # print 'rating: ' + rating
     # print 'votes: ' + votes
@@ -471,6 +493,8 @@ parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', de
                     help='Turn off comskip when adding a single recording with --add.')
 parser.add_argument('--add-match-title', dest='add_match_title', action='store', metavar='<title match>',
                     help='Process only recordings with titles that contain the given query.')
+parser.add_argument('--add-match-programid', dest='add_match_programid', action='store', metavar='<programid match',
+                    help='Process only recordings that match the given program id.')
 parser.add_argument('--export-recording-list', dest='export_recording_list', action='store_true', default=False,
                     help='Export the entire MythTV recording list to recording_list.xml.')
 parser.add_argument('--print-match-filename', dest='print_match_filename', action='store',
@@ -480,6 +504,9 @@ parser.add_argument('--print-match-title', dest='print_match_title', action='sto
                     help='Print recording xml for recordings with titles that contain the given query.')
 parser.add_argument('--print-config', dest='print_config', action='store_true',
                     help='Prints all the config variables and values in the config.py file.')
+parser.add_argument('--import-recording-list', dest='import_recording_list', action='store',
+                    metavar='<path to xml file',
+                    help='Import recording list in xml format. Specify full path to xml file.')
 
 # TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
@@ -496,6 +523,9 @@ if len(sys.argv) == 1:
 
 args = parser.parse_args()
 # print args.print_match_filename
+args_add_match_title = None
+if args.add_match_title is not None:
+    args_add_match_title = unicode(args.add_match_title)
 
 
 def print_config():
@@ -516,12 +546,22 @@ def print_config():
 
 def get_recording_list():
     """
-    get recorded list from mythtv database
+    get recorded list from mythtv database or from xml file specified with --import-recording-list argument
 
     :return: xml parsed recorded list
     """
-    # print "Looking up from MythTV: " + url + '/Dvr/GetRecordedList'
-    tree = ET.parse(urllib2.urlopen(BASE_URL + '/Dvr/GetRecordedList'))
+    if args.import_recording_list is not None:
+        log_info('Importing recording list from: ' + args.import_recording_list)
+        if not os.path.exists(args.import_recording_list):
+            log_error('--import-recording-list was specified but xml file was not found.')
+            raise Exception()
+        else:
+            path = os.path.join('file://', args.import_recording_list)
+            tree = ET.parse(path)
+    else:
+        url = BASE_URL + '/Dvr/GetRecordedList'
+        log_info('Looking up from MythTV: ' + url)
+        tree = ET.parse(urllib2.urlopen(url))
     # print prettify(tree.getroot())
     # sys.exit(0)
     return tree.getroot()
@@ -534,7 +574,7 @@ def write_log(msg=None):
     if msg is None:
         f.write(log_content)
     else:
-        f.write(log_content + '\n\n' + unicode(msg))
+        f.write(log_content + '\n\n' + msg + '\n\n')
     f.close()
 
 
@@ -588,13 +628,14 @@ def read_recordings():
     read MythTV recordings
 
     """
+    global encoding_last
     series_lib = []
     series_new_count = 0
     episode_count = 0
     episode_new_count = 0
     special_count = 0
     special_new_count = 0
-    image_error_lib = []
+    image_error_list = []
 
     if args.print_new is True:
         print 'MYTHTV RECORDINGS NOT LINKED:'
@@ -609,24 +650,29 @@ def read_recordings():
         is_special = False
 
         # check if we're adding a new file by comparing the current file name to the argument file name
-        file_name = unicode(recording.find('FileName').text)
-        base_file_name = unicode(get_base_filename_from(file_name))
+        file_name = recording.find('FileName').text
+        base_file_name = get_base_filename_from(file_name)
         if args.add is not None:
-            if not base_file_name == unicode(get_base_filename_from(args.add)):
+            if not base_file_name == get_base_filename_from(args.add):
                 continue
             log_info('Adding new file by "--add" argument: {}'.format(args.add))
             print 'ADDING NEW RECORDING: ' + args.add
 
         # print recording info if --print_match_filename arg is given
         if args.print_match_filename is not None:
-            if unicode(args.print_match_filename) in base_file_name:
+            if args.print_match_filename in base_file_name:
                 print prettify(recording)
                 sys.exit(0)
             else:
                 continue
 
-        # print recording info for testing
         title = unicode(recording.find('Title').text)
+        # check if we are matching on a title
+        if args_add_match_title is not None:
+            if args_add_match_title not in title:
+                encoding_last = None
+                continue
+
         if args.print_match_title is not None and args.print_match_title in title:
             print prettify(recording)
             continue
@@ -636,63 +682,80 @@ def read_recordings():
         episode = unicode(recording.find('Episode').text.zfill(2))
         airdate = unicode(recording.find('Airdate').text)
         plot = unicode(recording.find('Description').text)
-        inetref = unicode(recording.find('Inetref').text)
         category = unicode(recording.find('Category').text)
-        record_date = unicode(re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0])
+        record_date = re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0]
+        inetref = unicode(recording.find('Inetref').text)
         program_id = unicode(recording.find('ProgramId').text)
         # chan_id = program.find('Channel/ChanId').text
         # start_time = program.find('StartTime').text.replace('T', ' ').replace('Z', '')
 
-        # check if we are matching on a title
-        if args.add_match_title is not None:
-            if args.add_match_title not in title:
+        # log_info('PROCESSING RECORDING')
+        # log_info('  title: ' + title)
+        # log_info('  season: ' + season)
+        # log_info('  episode: ' + episode)
+        # log_info('  airdate: ' + airdate)
+        # log_info('  plot: ' + plot)
+        # log_info('  inetref: ' + inetref)
+        # log_info('  category: ' + category)
+        # log_info('  record_date: ' + record_date)
+        # log_info('  program_id: ' + program_id)
+
+        # check if we are matching on a program id
+        if args.add_match_programid is not None:
+            if not args.add_match_programid == program_id:
                 continue
+            else:
+                print('PROGRAM ID MATCH: ' + program_id)
+                print('title: ' + title)
+                print('plot: ' + plot)
 
         file_extension = file_name[-4:]
         log_info('PROCESSING PROGRAM:\n^title: {}\n^filename: {}\n^program id: {}'.format(title,
                                                                                           base_file_name + file_extension,
                                                                                           program_id))
-
         # be sure we have an inetref
         if inetref is None or inetref == '':
             log_warning('Inetref was not found, cannot process: ' + title)
             continue
 
         # lookup watched flag from db
-        if program_id is not None and not program_id == '':
-            try:
-                log_info('Looking up watched flag from db')
-                cursor = get_db_cursor()
-                sql = 'select watched from recorded where programid = "{}";'.format(program_id)
-                cursor.execute(sql)
-                results = cursor.fetchone()
-                playcount = unicode(re.findall('\d', unicode(results))[0])
+        # (skip this if we are reading from an xml file)
+        playcount = None
+        if args.import_recording_list is None:
+            if program_id is not None and not program_id == '':
+                try:
+                    log_info('Looking up watched flag from db')
+                    cursor = get_db_cursor()
+                    sql = 'select watched from recorded where programid = "{}";'.format(program_id)
+                    cursor.execute(sql)
+                    results = cursor.fetchone()
+                    if results is not None:
+                        playcount = unicode(results[0])
 
-                # # lookup commercial markers (not used, replaced with comskip)
-                # log_info('Looking up commercial markers')
-                # mark_list = []
-                # mark_types = ( '4', '5')
-                # for mark_type in mark_types:
-                #     sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
-                #         start_time, chan_id, mark_type)
-                #     cursor.execute(sql)
-                #     results = cursor.fetchall()
-                #     l = []
-                #     for result in results:
-                #         l.append(result[0])
-                #     mark_list.append(l)
-                #
-                # mark_dict = dict(zip(mark_list[0], mark_list[1]))
+                        # # lookup commercial markers (not used, replaced with comskip)
+                        # log_info('Looking up commercial markers')
+                        # mark_list = []
+                        # mark_types = ( '4', '5')
+                        # for mark_type in mark_types:
+                        # sql = 'select mark from recordedmarkup where starttime = "{}" and chanid = "{}" and type = "{}"'.format(
+                        # start_time, chan_id, mark_type)
+                        # cursor.execute(sql)
+                        # results = cursor.fetchall()
+                        # l = []
+                        #     for result in results:
+                        #         l.append(result[0])
+                        #     mark_list.append(l)
+                        #
+                        # mark_dict = dict(zip(mark_list[0], mark_list[1]))
 
-            except(AttributeError, MySQLdb.OperationalError):
-                log_error('Unable to fetch data!')
-                print AttributeError.message
-                print 'Error: unable to fetch data'
+                except(AttributeError, MySQLdb.OperationalError):
+                    log_error('Unable to fetch data!')
+                    print AttributeError.message
+                    print 'Error: unable to fetch data'
 
-        else:
-            playcount = None
-            log_warning('ProgramId was not found, playcount could not be determined for: ' + title)
-            continue
+            else:
+                log_warning('ProgramId was not found, playcount could not be determined for: ' + title)
+                continue
 
         # parse show name for file system safe name
         title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
@@ -739,18 +802,20 @@ def read_recordings():
             continue
 
         # find source directory, and if not found, skip it because it's an orphaned recording!
-        source_dir = None
-        for mythtv_recording_dir in config.mythtv_recording_dirs[:]:
-            source_file = os.path.join(mythtv_recording_dir, base_file_name) + file_extension
-            if os.path.isfile(source_file):
-                source_dir = unicode(mythtv_recording_dir)
-                break
+        # (skip this if we are reading from an xml file)
+        if args.import_recording_list is None:
+            source_dir = None
+            for mythtv_recording_dir in config.mythtv_recording_dirs[:]:
+                source_file = os.path.join(mythtv_recording_dir, base_file_name) + file_extension
+                if os.path.isfile(source_file):
+                    source_dir = mythtv_recording_dir
+                    break
 
-        if source_dir is None:
-            # could not find file!
-            # print ("Cannot create symlink for " + episode_name + ", no valid source directory.  Skipping.")
-            log_error('Cannot create symlink for ' + episode_name + ', no valid source directory.  Skipping.')
-            continue
+            if source_dir is None:
+                # could not find file!
+                # print ("Cannot create symlink for " + episode_name + ", no valid source directory.  Skipping.")
+                log_error('Cannot create symlink for ' + episode_name + ', no valid source directory.  Skipping.')
+                continue
 
         # this is a new recording, so check if we're just getting a list of them for now
         if args.print_new is True:
@@ -776,18 +841,18 @@ def read_recordings():
                 if args.show_all is False:
                     result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
 
-            # print "RESULT: " + unicode(result)
+            # print "RESULT: " + result
             if result is False:
-                image_error_lib.append(link_file)
-                print 'ERROR processing image for link_file: ' + link_file
-                log_error('Error processing image for link_file: ' + link_file)
+                image_error_list.append(link_file)
+                # print 'ERROR processing image for link_file: ' + link_file
+                log_warning('Could not retrieve one or more images for link_file: ' + link_file)
                 continue
 
         # create symlink
         # print "Linking " + source_file + " ==> " + link_file
-        if args.show_all is False:
+        if args.show_all is False and args.import_recording_list is None:
+            log_info('Linking ' + source_file + ' ==> ' + link_file)
             os.symlink(source_file, link_file)
-        log_info('Linking ' + source_file + ' ==> ' + link_file)
 
         # write the episode nfo and comskip file
         path = os.path.splitext(link_file)[0]
@@ -813,26 +878,28 @@ def read_recordings():
 
     print ''
     print '   --------------------------------'
-    print '   |         |  Series:   ' + unicode(len(series_lib))
-    print '   |  Total  |  Episodes: ' + unicode(episode_count)
-    print '   |         |  Specials: ' + unicode(special_count)
+    print '   |         |  Series:   ' + str(len(series_lib))
+    print '   |  Total  |  Episodes: ' + str(episode_count)
+    print '   |         |  Specials: ' + str(special_count)
     print '   |-------------------------------'
-    print '   |         |  Series:   ' + unicode(series_new_count)
-    print '   |   New   |  Episodes: ' + unicode(episode_new_count)
-    print '   |         |  Specials: ' + unicode(special_new_count)
+    print '   |         |  Series:   ' + str(series_new_count)
+    print '   |   New   |  Episodes: ' + str(episode_new_count)
+    print '   |         |  Specials: ' + str(special_new_count)
     print '   --------------------------------'
-    print '   |  Errors: ' + unicode(len(image_error_lib))
-    if len(image_error_lib) > 0:
-        print ''
-        print 'Error processing images for these link_files:'
-        print ''
-        for lf in image_error_lib:
-            print lf
-    else:
-        print '   --------------------------------'
+    print '   |  Image processing errors: ' + str(len(image_error_list))
+    print '   --------------------------------'
+
+    if len(image_error_list) > 0:
+        if len(image_error_list) > 0:
+            print ''
+            print ''
+            print 'One or more images could not be created for these recordings:'
+            print '------------------------------------------------------------'
+            for lf in image_error_list:
+                print lf
     print ''
 
-    return not (len(image_error_lib) > 0 or 'ERROR' in log_content)
+    return not (len(image_error_list) > 0 or 'ERROR' in log_content)
 
 
 try:
@@ -841,13 +908,14 @@ try:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
-    # elif args.add_all is True or args.show_all is True or args.add_match_title is not None or args.add is not None:
-    success = read_recordings()
-    if success is not True:
-        sys.exit(1)
+    elif args.add_all is True or args.show_all is True or args.add_match_title is not None or args.add is not None:
+        success = read_recordings()
+        if success is not True:
+            raise Exception('read_recordings() returned false')
 except Exception, e:
     close_db()
-    write_log(e)
+    write_log('Line number: ' + str(sys.exc_traceback.tb_lineno) + '\n' + str(e))
+    # print('Line number: ' + str(sys.exc_traceback.tb_lineno))
     sys.exit(1)
 else:
     close_db()
