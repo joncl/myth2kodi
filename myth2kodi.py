@@ -18,6 +18,8 @@ import MySQLdb
 import time
 import subprocess
 import config
+import calendar
+from datetime import datetime, timedelta
 
 reload(sys)
 sys.setdefaultencoding('utf-8')
@@ -26,6 +28,7 @@ BASE_URL = "http://" + config.hostname + ":" + config.host_port
 THIS_DIR = os.getcwd()
 db = None
 log_content = ''
+log_filename = None
 
 
 def timestamp():
@@ -567,10 +570,17 @@ def get_recording_list():
     return tree.getroot()
 
 
-def write_log(msg=None):
+def write_log(success, msg=None):
+    global log_filename
     global log_content
+
+    if log_filename is not None and success is False:
+        filename = 'ERROR - ' + log_filename + '.log'
+    else:
+        filename = 'myth2kodi.log'
+
     log_content += '\n\n'
-    f = open('myth2kodi.log', 'w')
+    f = open(filename, 'w')
     if msg is None:
         f.write(log_content)
     else:
@@ -623,12 +633,21 @@ def write_recording_list(recording_list):
     log_info('Done writing recording list.')
 
 
+def get_local_start_time(start_time):
+    utc_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
+    timestamp = calendar.timegm(utc_dt.timetuple())
+    local_dt = datetime.fromtimestamp(timestamp)
+    assert utc_dt.resolution >= timedelta(microseconds=1)
+    return local_dt.replace(microsecond=utc_dt.microsecond)
+
+
 def read_recordings():
     """
     read MythTV recordings
 
     """
     global encoding_last
+    global log_filename
     series_lib = []
     series_new_count = 0
     episode_count = 0
@@ -686,8 +705,8 @@ def read_recordings():
         record_date = re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0]
         inetref = unicode(recording.find('Inetref').text)
         program_id = unicode(recording.find('ProgramId').text)
-        # chan_id = program.find('Channel/ChanId').text
-        # start_time = program.find('StartTime').text.replace('T', ' ').replace('Z', '')
+        # chan_id = recording.find('Channel/ChanId').text
+        start_time = unicode(recording.find('StartTime').text).replace('T', ' ').replace('Z', '')
 
         # log_info('PROCESSING RECORDING')
         # log_info('  title: ' + title)
@@ -742,8 +761,8 @@ def read_recordings():
                         # cursor.execute(sql)
                         # results = cursor.fetchall()
                         # l = []
-                        #     for result in results:
-                        #         l.append(result[0])
+                        # for result in results:
+                        # l.append(result[0])
                         #     mark_list.append(l)
                         #
                         # mark_dict = dict(zip(mark_list[0], mark_list[1]))
@@ -760,6 +779,11 @@ def read_recordings():
         # parse show name for file system safe name
         title_safe = re.sub('[\[\]/\\;><&*:%=+@!#^()|?]', '', title)
         title_safe = re.sub(' +', '_', title_safe)
+
+        # determine the log filename for this recording (only used when adding a single recording with '--add')
+        if args.add is not None:
+            local_start_time = get_local_start_time(start_time)
+            log_filename = local_start_time.strftime('%c') + ' - ' + title_safe
 
         # form the file name
         episode_name = title_safe + " - " + season + "x" + episode + " - " + base_file_name
@@ -899,7 +923,19 @@ def read_recordings():
                 print lf
     print ''
 
-    return not (len(image_error_list) > 0 or 'ERROR' in log_content)
+    encountered_image_error = (len(image_error_list) > 0)
+    encountered_other_error = ('ERROR' in log_content)
+    if encountered_image_error is True:
+        print 'Encountered error processing poster, banner, or fanart image for new series.'
+    elif encountered_other_error is True:
+        print 'Encountered an error. Check log.'
+
+    if encountered_image_error is True or encountered_other_error is True:
+        return False
+    else:
+        print 'Done! (no errors encountered)'
+        print ''
+        return True
 
 
 try:
@@ -910,14 +946,14 @@ try:
         comskip_all()
     elif args.add_all is True or args.show_all is True or args.add_match_title is not None or args.add is not None:
         success = read_recordings()
-        if success is not True:
+        if success is False:
             raise Exception('read_recordings() returned false')
 except Exception, e:
     close_db()
-    write_log('Line number: ' + str(sys.exc_traceback.tb_lineno) + '\n' + str(e))
+    write_log(False, 'Line number: ' + str(sys.exc_traceback.tb_lineno) + '\n' + str(e))
     # print('Line number: ' + str(sys.exc_traceback.tb_lineno))
     sys.exit(1)
 else:
     close_db()
-    write_log()
+    write_log(True)
     sys.exit(0)
