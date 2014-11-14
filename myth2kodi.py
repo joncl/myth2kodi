@@ -1,6 +1,19 @@
 #! /usr/bin/env python
 # -*- coding: UTF-8 -*-
 # ---------------------------
+"""
+---------------------------
+Name: myth2kodi.py
+Author: jncl
+Version: 0.1.32
+Description:
+   A script for generating a library of MythTV show recordings for Kodi(XBMC). The key feature of this script is that
+   "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the
+   **same series** for easy navigation in Kodi. To generate the library, recordings are symlinked, and metadata and
+   image links (posters, fanart, and banners) for each series are pulled from either TheTVDB or TheMovieDB depending
+   on the "inetref" value in MythTV. Commercial detection is done with comskip.
+---------------------------
+"""
 
 import httplib
 
@@ -17,11 +30,8 @@ import cStringIO
 import json
 import sys
 import MySQLdb
-import time
 import subprocess
 import config
-import calendar
-from datetime import datetime, timedelta
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
@@ -58,6 +68,8 @@ parser.add_argument('--comskip-all', dest='comskip_all', action='store_true', de
                     help='Run comskip on all video files found recursively in the "symlinks_dir" path from config.py.')
 parser.add_argument('--comskip-off', dest='comskip_off', action='store_true', default=False,
                     help='Turn off comskip when adding a single recording with --add.')
+parser.add_argument('--comskip-status', dest='comskip_status', action='store_true', default=False,
+                    help='Report sym-linked recordings with missing comskip files.')
 parser.add_argument('--add-match-title', dest='add_match_title', action='store', metavar='<title match>',
                     help='Process only recordings with titles that contain the given query.')
 parser.add_argument('--add-match-programid', dest='add_match_programid', action='store', metavar='<programid match',
@@ -110,13 +122,6 @@ def initialize_logging():
         log.setLevel(logging.INFO)
 
     log.debug('Logging initialized')
-
-
-def timestamp():
-    now = time.time()
-    localtime = time.localtime(now)
-    ms = '%03d' % int((now - int(now)) * 1000)
-    return time.strftime('%Y%_m%d_%H%M%S', localtime) + '.' + ms
 
 
 def get_db_cursor():
@@ -570,30 +575,29 @@ def get_recording_list():
     return tree.getroot()
 
 
-def comskip_file(path, file):
+def comskip_file(root_path, file):
     if file.lower().endswith('.mpg'):
-        log.info('Processing comskip on: ' + os.path.join(path, file))
         base_file = os.path.splitext(file)[0]
-        txt_file = os.path.join(path, base_file + '.txt')
-        log_file = os.path.join(path, base_file + '.log')
-        logo_file = os.path.join(path, base_file + '.logo.txt')
-        edl_file = os.path.join(path, base_file + '.edl')
+        txt_file = os.path.join(root_path, base_file + '.txt')
+        log_file = os.path.join(root_path, base_file + '.log')
+        logo_file = os.path.join(root_path, base_file + '.logo.txt')
+        edl_file = os.path.join(root_path, base_file + '.edl')
 
         # if txt file exists, then skip this mpg
         if os.path.exists(txt_file):
-            log.info('Already processed comskip on this file, skipping.')
-            return
+            return False
 
         # run comskip
+        log.info('Running comskip on: ' + os.path.join(root_path, file))
         base_comskip_dir = os.path.dirname(config.comskip_exe)
-        log.info('Changing directory to: ' + base_comskip_dir)
+        log.debug('Changing directory to: ' + base_comskip_dir)
         os.chdir(base_comskip_dir)
-        command = 'wine {} "{}"'.format(config.comskip_exe, os.path.join(path, file))
+        command = 'wine {} "{}"'.format(config.comskip_exe, os.path.join(root_path, file))
         log.debug('Calling comskip with:')
         log.debug(command)
         try:
             exit_code = subprocess.call(command, shell=True)
-            log.info('Comskip completed. Exit code is {}.'.format(str(exit_code)))
+            log.info('Comskip completed.'.format(str(exit_code)))
         except Exception, e:
             log.error('Exception encountered running comskip...')
             log.error(str(e))
@@ -608,15 +612,53 @@ def comskip_file(path, file):
         if os.path.exists(edl_file):
             os.rename(edl_file, edl_file + '.bak')
 
+        return True
+
 
 def comskip_all():
+    log.info('compskip_all()')
+    count = comskip_status(return_missing_count=True)
+    if count == 0:
+        log.info('No missing comskip files were found.')
+        print('No missing comskip files were found.')
+    else:
+        log.info('Running comskip on ' + str(count) + ' recordings with missing comskip files...')
+        for root, dirs, files in os.walk(config.symlinks_dir):
+            # print root
+            # path = root.split('/')
+            # print path
+            # print (len(path) - 1) *'---' , os.path.basename(root)
+            for file in files:
+                comskip_ran = comskip_file(root, file)
+                if comskip_ran is True:
+                    log.info(str(count) + ' recordings left to comskip.')
+                    count -= 1
+
+
+def comskip_status(return_missing_count=False):
+    comskip_missing_lib = []
     for root, dirs, files in os.walk(config.symlinks_dir):
         # print root
         # path = root.split('/')
         # print path
         # print (len(path) - 1) *'---' , os.path.basename(root)
         for file in files:
-            comskip_file(root, file)
+            if file.lower().endswith('.mpg'):
+                base_file = os.path.splitext(file)[0]
+                txt_file = os.path.join(root, base_file + '.txt')
+                edl_file = os.path.join(root, base_file + '.edl.bak')
+                if os.path.exists(txt_file) and os.path.exists(edl_file):
+                    continue
+                comskip_missing_lib.append(os.path.join(root, file))
+    count = len(comskip_missing_lib) - 1
+    if return_missing_count is True:
+        return count
+    message = '  Found ' + str(len(comskip_missing_lib) - 1) + ' recordings with missing comskip files.'
+    if count > 0:
+        message += ' Use "--comskip-all" to process them.'
+    print ''
+    print message
+    print ''
 
 
 def write_recording_list(recording_list):
@@ -625,14 +667,6 @@ def write_recording_list(recording_list):
     f.write(prettify(recording_list))
     f.close()
     log.info('Done writing recording list.')
-
-
-def get_local_start_time(start_time):
-    utc_dt = datetime.strptime(start_time, '%Y-%m-%d %H:%M:%S')
-    timestamp = calendar.timegm(utc_dt.timetuple())
-    local_dt = datetime.fromtimestamp(timestamp)
-    assert utc_dt.resolution >= timedelta(microseconds=1)
-    return local_dt.replace(microsecond=utc_dt.microsecond)
 
 
 def read_recordings():
@@ -695,7 +729,7 @@ def read_recordings():
         inetref = unicode(recording.find('Inetref').text)
         program_id = unicode(recording.find('ProgramId').text)
         # chan_id = recording.find('Channel/ChanId').text
-        #start_time = unicode(recording.find('StartTime').text).replace('T', ' ').replace('Z', '')
+        # start_time = unicode(recording.find('StartTime').text).replace('T', ' ').replace('Z', '')
 
         # log.info('PROCESSING RECORDING')
         # log.info('  title: ' + title)
@@ -755,7 +789,7 @@ def read_recordings():
                         # l = []
                         # for result in results:
                         # l.append(result[0])
-                        #     mark_list.append(l)
+                        # mark_list.append(l)
                         #
                         # mark_dict = dict(zip(mark_list[0], mark_list[1]))
 
@@ -796,8 +830,8 @@ def read_recordings():
         # check if we're running comskip on just one recording
         if args.comskip is not None:
             if base_file_name == get_base_filename_from(args.comskip):
-                comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
                 log.info('Running comskip on ' + args.comskip)
+                comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
                 break
 
         # update series library and count
@@ -830,14 +864,14 @@ def read_recordings():
         # this is a new recording, so check if we're just checking the status for now
         if args.show_status is True and is_special is True:
             special_new_lib.append(link_file)
-            #print str(special_count) + ' ' + source_file
+            # print str(special_count) + ' ' + source_file
             continue
 
         # if this is a new series, then make a new directory for it
         if not os.path.exists(target_link_dir):  # and 'Johnny' in title_safe:
             if args.show_status is False:
                 os.makedirs(target_link_dir)
-            #series_new_count += 1
+            # series_new_count += 1
             series_new_lib.append(target_link_dir)
 
             # branch on inetref type
@@ -860,7 +894,7 @@ def read_recordings():
                     image_error_list.append(link_file)
                     # print 'ERROR processing image for link_file: ' + link_file
                     log.warning('Could not retrieve one or more images for link_file: ' + link_file)
-                    #continue
+                    # continue
 
         # create symlink
         # print "Linking " + source_file + " ==> " + link_file
@@ -880,9 +914,9 @@ def read_recordings():
         # count new episode or special
         if is_special is True:
             special_new_lib.append(source_file)
-            #special_new_count += 1
+            # special_new_count += 1
         else:
-            #episode_new_count += 1
+            # episode_new_count += 1
             episode_new_lib.append(source_file)
 
         # if adding a new recording with --add, comskip it, and then stop looking
@@ -946,7 +980,7 @@ def read_recordings():
     if encountered_image_error is True or encountered_other_error is True:
         return False
     else:
-        #print 'Done! Completed successfully.'
+        # print 'Done! Completed successfully.'
         print ''
         return True
 
@@ -958,6 +992,8 @@ try:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
+    elif args.comskip_status is True:
+        comskip_status()
     elif args.add_all is True or args.show_status is True or args.add_match_title is not None or args.add is not None:
         success = read_recordings()
         if success is False:
@@ -965,7 +1001,6 @@ try:
         else:
             log.info('DONE! Completed successfully!')
             close_db()
-            #write_log(True)
             sys.exit(0)
 except Exception, e:
     close_db()
