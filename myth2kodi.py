@@ -5,7 +5,7 @@
 ---------------------------
 Name: myth2kodi.py
 Author: jncl
-Version: 0.1.32
+Version: 0.1.33
 Description:
    A script for generating a library of MythTV show recordings for Kodi(XBMC). The key feature of this script is that
    "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the
@@ -173,6 +173,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     :param date_added:
     :return:
     """
+    global log
     log.info('Writing series nfo file...')
     root = ET2.Element('tvshow')
     title_element = ET2.SubElement(root, 'title')
@@ -292,6 +293,7 @@ def get_series_id(inetref):
 
 
 def download_file(file_url, target_file='', return_response=False):
+    global log
     if return_response is False:
         log.info('Saving: ' + file_url)
         log.info('    to: ' + target_file)
@@ -332,6 +334,7 @@ def new_series_from_ttvdb(title, title_safe, inetref, category, directory):
     :param directory:
     :return: True: success, False: error
     """
+    global log
     ttvdb_base_url = 'http://www.thetvdb.com/'
     series_id = get_series_id(inetref)
     series_zip_file = os.path.join(config.ttvdb_zips_dir, title_safe + '_' + series_id + '.zip')
@@ -427,6 +430,7 @@ def new_series_from_tmdb(title, inetref, category, directory):
     :param directory:
     :return: True: success, False: error
     """
+    global log
     api_url = 'http://api.themoviedb.org/3'
     headers = {'Accept': 'application/json'}
 
@@ -558,6 +562,7 @@ def get_recording_list():
 
     :return: xml parsed recorded list
     """
+    global log
     if args.import_recording_list is not None:
         log.info('Importing recording list from: ' + args.import_recording_list)
         if not os.path.exists(args.import_recording_list):
@@ -576,6 +581,7 @@ def get_recording_list():
 
 
 def comskip_file(root_path, file):
+    global log
     if file.lower().endswith('.mpg'):
         base_file = os.path.splitext(file)[0]
         txt_file = os.path.join(root_path, base_file + '.txt')
@@ -616,6 +622,7 @@ def comskip_file(root_path, file):
 
 
 def comskip_all():
+    global log
     log.info('compskip_all()')
     count = comskip_status(return_missing_count=True)
     if count == 0:
@@ -662,6 +669,7 @@ def comskip_status(return_missing_count=False):
 
 
 def write_recording_list(recording_list):
+    global log
     log.info('Writing recording list.')
     f = open('recording_list.xml', 'w')
     f.write(prettify(recording_list))
@@ -674,6 +682,7 @@ def read_recordings():
     read MythTV recordings
 
     """
+    global log
     print ''
     series_lib = []
     series_new_lib = []
