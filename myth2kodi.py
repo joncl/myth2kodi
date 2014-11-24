@@ -5,7 +5,7 @@
 ---------------------------
 Name: myth2kodi.py
 Author: jncl
-Version: 0.1.33
+Version: 0.1.34
 Description:
    A script for generating a library of MythTV show recordings for Kodi(XBMC). The key feature of this script is that
    "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the
@@ -1013,8 +1013,7 @@ try:
             sys.exit(0)
 except Exception, e:
     close_db()
-    log.error('Exception at line number: ' + str(sys.exc_traceback.tb_lineno))
-    log.error('Exception message: ' + str(e))
     print('Line number: ' + str(sys.exc_traceback.tb_lineno))
-    print(e)
+    print('Exception message: ' + str(e))
+    print('Traceback: ' + sys.exc_info()[0])
     sys.exit(1)
