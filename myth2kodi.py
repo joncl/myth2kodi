@@ -5,7 +5,7 @@
 ---------------------------
 Name: myth2kodi.py
 Author: jncl
-Version: 0.1.34
+Version: 0.1.35
 Description:
    A script for generating a library of MythTV show recordings for Kodi(XBMC). The key feature of this script is that
    "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the
@@ -88,6 +88,8 @@ parser.add_argument('--import-recording-list', dest='import_recording_list', act
                     help='Import recording list in xml format. Specify full path to xml file.')
 parser.add_argument('--log-debug', dest='log_debug', action='store_true', default=False,
                     help='Write debug messages to the log file. Default logging level is INFO.')
+parser.add_argument('--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
+                    help='Refresh nfo files. Can be combined with --add to refresh specific nfo file.')
 
 # TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
@@ -97,6 +99,7 @@ parser.add_argument('--log-debug', dest='log_debug', action='store_true', defaul
 # help='remove all references to deleted MythTV recordings')
 # parser.add_argument('--rebuild-library', dest='rebuild_library', action='store_true', default=False,
 # help='rebuild library from existing links')
+
 
 if len(sys.argv) == 1:
     parser.error('At lease one argument is required. Use -h or --help for details.')
@@ -109,9 +112,13 @@ if args.add_match_title is not None:
     args_add_match_title = unicode(args.add_match_title)
 
 
+def get_script_path():
+    return os.path.dirname(os.path.realpath(sys.argv[0]))
+
+
 def initialize_logging():
     global log
-    handler = TimedRotatingFileHandler('/home/mythtv/myth2kodi/myth2kodi.log', when='midnight', backupCount=5)
+    handler = TimedRotatingFileHandler(os.path.join(get_script_path(), 'myth2kodi.log'), when='midnight', backupCount=5)
     formatter = logging.Formatter('%(asctime)s.%(msecs)d %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     handler.setFormatter(formatter)
     log = logging.getLogger('myth2kodi')
@@ -591,6 +598,7 @@ def comskip_file(root_path, file):
 
         # if txt file exists, then skip this mpg
         if os.path.exists(txt_file):
+            log.info('Skipping comskip (txt file exists) for: ' + file)
             return False
 
         # run comskip
@@ -691,6 +699,7 @@ def read_recordings():
     special_count = 0
     special_new_lib = []
     image_error_list = []
+    updated_nfos_lib = []
 
     recording_list = get_recording_list()
 
@@ -847,12 +856,13 @@ def read_recordings():
         if not series_lib or title_safe not in series_lib:
             series_lib.append(title_safe)
 
-        # skip if link already exists
+        # skip if link already exists (unless we're updating nfo files)
         if os.path.exists(link_file) or os.path.islink(link_file):
             if args.add is True and args.show_status is False:
                 print 'Symlink already exists: ' + link_file
                 log.info('Symlink already exists: ' + link_file)
-            continue
+                if args.refresh_nfos is False:
+                    continue
 
         # find source directory, and if not found, skip it because it's an orphaned recording!
         # (skip this if we are reading from an xml file)
@@ -870,7 +880,7 @@ def read_recordings():
                 log.error('Cannot create symlink for ' + episode_name + ', no valid source directory.  Skipping.')
                 continue
 
-        # this is a new recording, so check if we're just checking the status for now
+        # this is a new recording (or we're just refreshing nfo files), so check if we're just checking the status for now
         if args.show_status is True and is_special is True:
             special_new_lib.append(link_file)
             # print str(special_count) + ' ' + source_file
@@ -908,8 +918,9 @@ def read_recordings():
         # create symlink
         # print "Linking " + source_file + " ==> " + link_file
         if args.show_status is False and args.import_recording_list is None:
-            log.info('Linking ' + source_file + ' ==> ' + link_file)
-            os.symlink(source_file, link_file)
+            if not os.path.exists(link_file) or not os.path.islink(link_file):
+                log.info('Linking ' + source_file + ' ==> ' + link_file)
+                os.symlink(source_file, link_file)
 
         # write the episode nfo and comskip file
         if args.show_status is False:
@@ -927,6 +938,10 @@ def read_recordings():
         else:
             # episode_new_count += 1
             episode_new_lib.append(source_file)
+
+        # count number of updated nfo files
+        if args.refresh_nfos is True:
+            updated_nfos_lib.append(source_file)
 
         # if adding a new recording with --add, comskip it, and then stop looking
         if args.add is not None and args.show_status is False:
@@ -946,6 +961,10 @@ def read_recordings():
         print '   |         |  Specials: ' + str(len(special_new_lib))
         print '   --------------------------------'
         print '   |  Image processing errors: ' + str(len(image_error_list))
+        print '   --------------------------------'
+
+    if args.refresh_nfos is True:
+        print '   |  Updated nfos: ' + str(len(updated_nfos_lib))
         print '   --------------------------------'
 
     if args.show_status is True:
@@ -973,8 +992,8 @@ def read_recordings():
     elif len(image_error_list) > 0:
         print ''
         print ''
-        print 'One or more images could not be created for these recordings:'
-        print '------------------------------------------------------------'
+        print 'Warning: One or more banner, fanart, or poster images could not be created for these recordings:'
+        print '-----------------------------------------------------------------------------------------------'
         for lf in image_error_list:
             print lf
     print ''
@@ -1003,7 +1022,7 @@ try:
         comskip_all()
     elif args.comskip_status is True:
         comskip_status()
-    elif args.add_all is True or args.show_status is True or args.add_match_title is not None or args.add is not None:
+    elif args.add_all is True or args.show_status is True or args.add_match_title is not None or args.add is not None or args.print_match_filename is not None or args.refresh_nfos is True or args.comskip is not None:
         success = read_recordings()
         if success is False:
             raise Exception('read_recordings() returned false')
