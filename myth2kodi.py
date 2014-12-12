@@ -5,7 +5,7 @@
 ---------------------------
 Name: myth2kodi.py
 Author: jncl
-Version: 0.1.35
+Version: 0.1.36
 Description:
    A script for generating a library of MythTV show recordings for Kodi(XBMC). The key feature of this script is that
    "Specials" (episodes with the same series title, but missing show and episode info) are grouped together under the
@@ -90,6 +90,8 @@ parser.add_argument('--log-debug', dest='log_debug', action='store_true', defaul
                     help='Write debug messages to the log file. Default logging level is INFO.')
 parser.add_argument('--refresh-nfos', dest='refresh_nfos', action='store_true', default=False,
                     help='Refresh nfo files. Can be combined with --add to refresh specific nfo file.')
+parser.add_argument('--clean', dest='clean', action='store_true', default=False,
+                    help='Perform cleanup operations on symlink directory.')
 
 # TODO: handle arguments refresh nfos
 # TODO: clean up symlinks, nfo files, and directories when MythTV recordings are deleted
@@ -119,7 +121,7 @@ def get_script_path():
 def initialize_logging():
     global log
     handler = TimedRotatingFileHandler(os.path.join(get_script_path(), 'myth2kodi.log'), when='midnight', backupCount=5)
-    formatter = logging.Formatter('%(asctime)s.%(msecs)d %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    formatter = logging.Formatter('[%(asctime)s.%(msecs)03d] [%(levelname)7s] - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     handler.setFormatter(formatter)
     log = logging.getLogger('myth2kodi')
     log.addHandler(handler)
@@ -129,6 +131,7 @@ def initialize_logging():
         log.setLevel(logging.INFO)
 
     log.debug('Logging initialized')
+    log.info('')
 
 
 def get_db_cursor():
@@ -218,7 +221,7 @@ def write_series_nfo(directory, title, rating, votes, plot, id, genre_list, prem
     return
 
 
-def write_episode_nfo(title, season, episode, plot, airdate, playcount, base_link_file):
+def write_episode_nfo(title, season, episode, plot, airdate, playcount, nfo_file):
     """
     write nfo file for episode
     :param title:
@@ -226,11 +229,10 @@ def write_episode_nfo(title, season, episode, plot, airdate, playcount, base_lin
     :param episode:
     :param plot:
     :param airdate:
-    :param base_link_file:
+    :param nfo_file:
     :return:
     """
-    if args.add is not None:
-        print '    ' + base_link_file
+    log.info('Writing episode info for: ' + nfo_file)
     root = ET2.Element('episodedetails')
     title_element = ET2.SubElement(root, 'title')
     title_element.text = title
@@ -245,7 +247,7 @@ def write_episode_nfo(title, season, episode, plot, airdate, playcount, base_lin
     playcount_element = ET2.SubElement(root, 'playcount')
     playcount_element.text = playcount
     tree = ET2.ElementTree(root)
-    tree.write(base_link_file + '.nfo', pretty_print=True, encoding='UTF-8', xml_declaration=True)
+    tree.write(nfo_file, pretty_print=True, encoding='UTF-8', xml_declaration=True)
     return
 
 
@@ -309,6 +311,8 @@ def download_file(file_url, target_file='', return_response=False):
         response = urllib2.urlopen(req)
         if return_response is True:
             return response
+        if response is None:
+            return False
         output = open(target_file, 'wb')
         output.write(response.read())
         output.close()
@@ -685,6 +689,28 @@ def write_recording_list(recording_list):
     log.info('Done writing recording list.')
 
 
+def clean():
+    # rename specials, removing any airdate in the filename that is no longer needed
+    cleaned_file = os.path.join(get_script_path(), 'cleaned')
+    cleaned_file_exists = os.path.exists(cleaned_file)
+    if args.clean is True or not cleaned_file_exists:
+        if args.clean is True:
+            log.info('Cleaning symlink directory per argument --clean')
+        else:
+            log.info('cleaned file was not found, will now perform a cleaning operation on the symlink directory...')
+        for root, dirs, files in os.walk(config.symlinks_dir):
+            for file in files:
+                # print os.path.join(root, file)
+                result = re.sub(r'(.*) - [\d]{4}-[\d]{2}-[\d]{2}(.*)', r'\1\2', file)
+                os.rename(os.path.join(root, file), os.path.join(root, result))
+        log.info('Cleaning complete.')
+        if not os.path.exists(cleaned_file):
+            open(cleaned_file, 'w').close()
+            log.info('cleaned file was written to script directory.')
+    elif cleaned_file_exists:
+            log.info('cleaned file found, clean operation was skipped.')
+
+
 def read_recordings():
     """
     read MythTV recordings
@@ -700,6 +726,9 @@ def read_recordings():
     special_new_lib = []
     image_error_list = []
     updated_nfos_lib = []
+
+    # make sure all files in the symlink directory are in the right format
+    clean()
 
     recording_list = get_recording_list()
 
@@ -740,10 +769,10 @@ def read_recordings():
         # collect program attributes
         season = unicode(recording.find('Season').text)
         episode = unicode(recording.find('Episode').text.zfill(2))
-        airdate = unicode(recording.find('Airdate').text)
+        air_date = unicode(recording.find('Airdate').text)
         plot = unicode(recording.find('Description').text)
         category = unicode(recording.find('Category').text)
-        record_date = re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0]
+        # record_date = re.findall('\d*-\d*-\d*', unicode(recording.find('StartTime').text))[0]
         inetref = unicode(recording.find('Inetref').text)
         program_id = unicode(recording.find('ProgramId').text)
         # chan_id = recording.find('Channel/ChanId').text
@@ -753,7 +782,7 @@ def read_recordings():
         # log.info('  title: ' + title)
         # log.info('  season: ' + season)
         # log.info('  episode: ' + episode)
-        # log.info('  airdate: ' + airdate)
+        # log.info('  air_date: ' + air_date)
         # log.info('  plot: ' + plot)
         # log.info('  inetref: ' + inetref)
         # log.info('  category: ' + category)
@@ -770,7 +799,6 @@ def read_recordings():
                 print('plot: ' + plot)
 
         file_extension = file_name[-4:]
-        log.info('')
         log.info('PROCESSING PROGRAM:')
         log.info('Title: ' + title)
         log.info('Filename: ' + base_file_name + file_extension)
@@ -833,8 +861,8 @@ def read_recordings():
         episode_name = title_safe + " - " + season + "x" + episode + " - " + base_file_name
         # if it's a special...
         if season.zfill(2) == "00" and episode == "00":
-            episode_name = episode_name + " - " + record_date
-            airdate = record_date  # might be needed so specials get sorted with recognized episodes
+            # episode_name = episode_name + " - " + air_date
+            # air_date = record_date  # might be needed so specials get sorted with recognized episodes
             is_special = True
             special_count += 1
         else:
@@ -858,10 +886,10 @@ def read_recordings():
 
         # skip if link already exists (unless we're updating nfo files)
         if os.path.exists(link_file) or os.path.islink(link_file):
-            if args.add is True and args.show_status is False:
+            if args.show_status is False and args.refresh_nfos is False:
                 print 'Symlink already exists: ' + link_file
                 log.info('Symlink already exists: ' + link_file)
-                if args.refresh_nfos is False:
+                if args.add is not None and args.refresh_nfos is False:
                     continue
 
         # find source directory, and if not found, skip it because it's an orphaned recording!
@@ -882,62 +910,84 @@ def read_recordings():
 
         # this is a new recording (or we're just refreshing nfo files), so check if we're just checking the status for now
         if args.show_status is True and is_special is True:
-            special_new_lib.append(link_file)
+            if not os.path.exists(link_file):
+                special_new_lib.append(link_file)
             # print str(special_count) + ' ' + source_file
             continue
 
         # if this is a new series, then make a new directory for it
-        if not os.path.exists(target_link_dir):  # and 'Johnny' in title_safe:
-            if args.show_status is False:
-                os.makedirs(target_link_dir)
-            # series_new_count += 1
-            series_new_lib.append(target_link_dir)
+        # of if a directory exists, but a tvshow.nfo file is not found
+        if args.refresh_nfos is False:
+            if not os.path.exists(target_link_dir) or (
+                        os.path.exists(target_link_dir) and not (
+                            os.path.exists(os.path.join(target_link_dir, 'tvshow.nfo')))):
+                if not os.path.exists(target_link_dir) and args.show_status is False:
+                    os.makedirs(target_link_dir)
+                # series_new_count += 1
+                if not target_link_dir in series_new_lib:
+                    series_new_lib.append(target_link_dir)
 
-            # branch on inetref type
-            if args.show_status is False:
-                result = True
-                if 'ttvdb' in inetref:
-                    print 'Adding new series from TTVDB: ' + title
-                    log.info('Adding new series from TTVDB: ' + title)
-                    if args.show_status is False:
-                        result = new_series_from_ttvdb(title, title_safe, get_series_id(inetref), category,
+                # branch on inetref type
+                if args.show_status is False:
+                    result = False
+                    generic_inetref = ('ttvdvb' not in inetref or 'tmdb' not in inetref)
+                    if generic_inetref is True:
+                        log.warning('Inetref provided is neither TTVDB or TMDB... trying each to find a match...')
+
+                    if 'ttvdb' in inetref or generic_inetref is True:
+                        if 'ttvdb' in inetref:
+                            print 'Adding new series from TTVDB: ' + title
+                            log.info('Adding new series from TTVDB: ' + title)
+                        else:
+                            log.info('Trying to find TTVDB series from generic inetref')
+                        result = new_series_from_ttvdb(title, title_safe, inetref, category,
                                                        target_link_dir)
-                if 'tmdb' in inetref:
-                    print 'Adding new series from TMDB: ' + title
-                    log.info('Adding new series from TMDB: ' + title)
-                    if args.show_status is False:
-                        result = new_series_from_tmdb(title, get_series_id(inetref), category, target_link_dir)
+                    if ('tmdb' in inetref or generic_inetref is True) and result is False:
+                        if 'tmdb' in inetref:
+                            print 'Adding new series from TMDB: ' + title
+                            log.info('Adding new series from TMDB: ' + title)
+                        else:
+                            log.info('Trying to find TMDB series from generic inetref')
+                        result = new_series_from_tmdb(title, inetref, category, target_link_dir)
 
-                # print "RESULT: " + result
-                if result is False:
-                    image_error_list.append(link_file)
-                    # print 'ERROR processing image for link_file: ' + link_file
-                    log.warning('Could not retrieve one or more images for link_file: ' + link_file)
-                    # continue
+                    # print "RESULT: " + result
+                    if result is False:
+                        image_error_list.append(link_file)
+                        # print 'ERROR processing image for link_file: ' + link_file
+                        log.warning(
+                            'Could find series from either TTVDB or TMDB. A tvshow.nfo may not be created if other episodes in the same series are also not found.')
+                        log.warning('Link file is: ' + link_file)
+                        # continue
 
         # create symlink
         # print "Linking " + source_file + " ==> " + link_file
-        if args.show_status is False and args.import_recording_list is None:
+        if args.show_status is False and args.import_recording_list is None and args.refresh_nfos is False:
             if not os.path.exists(link_file) or not os.path.islink(link_file):
                 log.info('Linking ' + source_file + ' ==> ' + link_file)
                 os.symlink(source_file, link_file)
 
-        # write the episode nfo and comskip file
-        if args.show_status is False:
-            path = os.path.splitext(link_file)[0]
-            write_episode_nfo(title, season, episode, plot, airdate, playcount, path)
+        # write the episode nfo
+        if args.show_status is False or args.refresh_nfos is True:
+            nfo_file = os.path.splitext(link_file)[0] + '.nfo'
+            if args.refresh_nfos is True and os.path.exists(nfo_file):
+                updated_nfos_lib.append(source_file)
+            if os.path.exists(target_link_dir):
+                write_episode_nfo(title, season, episode, plot, air_date, playcount, nfo_file)
+            if args.refresh_nfos is True:
+                continue
 
         # commercial skipping didn't work reliably using frames markers from the mythtv database as of .27
         # keep the code here anyway for later reference
         # write_comskip(path, mark_dict)
 
         # count new episode or special
-        if is_special is True:
-            special_new_lib.append(source_file)
-            # special_new_count += 1
-        else:
-            # episode_new_count += 1
-            episode_new_lib.append(source_file)
+        if not os.path.exists(link_file):
+            if is_special is True:
+                special_new_lib.append(link_file)
+                # special_new_count += 1
+            else:
+                # episode_new_count += 1
+                episode_new_lib.append(link_file)
 
         # count number of updated nfo files
         if args.refresh_nfos is True:
@@ -950,7 +1000,7 @@ def read_recordings():
                 comskip_file(os.path.dirname(link_file), os.path.basename(link_file))
             break
 
-    if args.add is None and args.show_status is True:
+    if args.add is None and args.show_status is True and args.refresh_nfos is False:
         print '   --------------------------------'
         print '   |         |  Series:   ' + str(len(series_lib))
         print '   |  Total  |  Episodes: ' + str(episode_count)
@@ -962,32 +1012,40 @@ def read_recordings():
         print '   --------------------------------'
         print '   |  Image processing errors: ' + str(len(image_error_list))
         print '   --------------------------------'
-
-    if args.refresh_nfos is True:
+    elif args.refresh_nfos is True:
+        print '   --------------------------------'
         print '   |  Updated nfos: ' + str(len(updated_nfos_lib))
         print '   --------------------------------'
 
     if args.show_status is True:
         if len(series_new_lib) > 0 or len(episode_new_lib) > 0 or len(special_new_lib) > 0:
             print ''
-            print '   MYTHTV RECORDINGS NOT LINKED:'
+            print '   THESE SYMLINKS ARE NOT YET CREATED:'
+            print '   ----------------------------------'
             if len(series_new_lib) > 0:
-                print '     New Series:'
+                print '   New Series:'
+                count = 1
                 for s in series_new_lib:
-                    print '  ' + s
+                    print '   ' + str(count) + ' - ' + s
+                    count += 1
+                print ''
             if len(episode_new_lib) > 0:
-                print '     New Episodes:'
-                for e in episode_new_lib:
-                    print '  ' + e
+                print '   New Episodes:'
+                count = 1
+                for s in episode_new_lib:
+                    print '   ' + str(count) + ' - ' + s
+                    count += 1
+                print ''
             if len(special_new_lib) > 0:
-                print '     New Specials:'
+                print '   New Specials:'
                 count = 1
                 for s in special_new_lib:
-                    print '     ' + str(count) + ' - ' + s
+                    print '   ' + str(count) + ' - ' + s
                     count += 1
+                print ''
         else:
             print ''
-            print 'No new recordings were found.'
+            print '   No new recordings were found.'
 
     elif len(image_error_list) > 0:
         print ''
@@ -1016,7 +1074,9 @@ def read_recordings():
 try:
     success = True
     initialize_logging()
-    if args.print_config is True:
+    if args.clean is True:
+        clean()
+    elif args.print_config is True:
         print_config()
     elif args.comskip_all is True:
         comskip_all()
@@ -1030,6 +1090,7 @@ try:
             log.info('DONE! Completed successfully!')
             close_db()
             sys.exit(0)
+    sys.exit(0)
 except Exception, e:
     close_db()
     print('Line number: ' + str(sys.exc_traceback.tb_lineno))
