@@ -137,7 +137,7 @@ def initialize_logging():
 def get_db_cursor():
     global db
     if db is None:
-        db = MySQLdb.connect(host='localhost',
+        db = MySQLdb.connect(host=config.db_host,
                              user=config.db_user,
                              passwd=config.db_passwd,
                              db=config.db_name,
